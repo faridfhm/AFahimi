@@ -149,3 +149,13 @@ Controls the background color of the editor.
 Set the component to today’s date:
 ```delphi
 JalaliDatePicker1.DateTime := Now;
+## License Notice
+
+This component may be used in personal, educational, and commercial applications.
+
+However, selling, reselling, or redistributing the component or its source code
+as a standalone product to other developers is not allowed without prior written
+permission from AFSoft.
+
+For commercial licensing or redistribution permission, please contact:
+your-email@example.com
