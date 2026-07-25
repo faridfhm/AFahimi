@@ -24,7 +24,10 @@
 ## اسکرین‌شات
 
 <p align="center">
-  <img src="images/jalali-calendar-demo.png" alt="Jalali Calendar Demo" width="700" />
+  <img src="images/images/jalali-calendar-01.png" alt="Jalali Calendar Demo" width="700" />
+    <img src="images/images/jalali-calendar-02.png" alt="Jalali Calendar Demo" width="700" />
+    <img src="images/images/jalali-calendar-03.png" alt="Jalali Calendar Demo" width="700" />
+    <img src="images/images/jalali-calendar-04.png" alt="Jalali Calendar Demo" width="700" />
 </p>
 
 ## نصب
