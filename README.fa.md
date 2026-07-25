@@ -22,12 +22,11 @@
 - توابع کمکی افزایش تاریخ: `IncYear`، `IncMonth` و `IncDay`
 
 ## اسکرین‌شات
-
 <p align="center">
-  <img src="images/images/jalali-calendar-01.png" alt="Jalali Calendar Demo" width="700" />
-    <img src="images/images/jalali-calendar-02.png" alt="Jalali Calendar Demo" width="700" />
-    <img src="images/images/jalali-calendar-03.png" alt="Jalali Calendar Demo" width="700" />
-    <img src="images/images/jalali-calendar-04.png" alt="Jalali Calendar Demo" width="700" />
+  <img src="images/jalali-calendar-01.png" alt="Jalali Calendar Demo 1" width="700" />
+  <img src="images/jalali-calendar-02.png" alt="Jalali Calendar Demo 2" width="700" />
+  <img src="images/jalali-calendar-03.png" alt="Jalali Calendar Demo 3" width="700" />
+  <img src="images/jalali-calendar-04.png" alt="Jalali Calendar Demo 4" width="700" />
 </p>
 
 ## نصب
