@@ -137,6 +137,9 @@ Controls the background color of the editor.
 ## Screenshot
 
 ![Jalali Calendar Demo](images/jalali-calendar-01.png)
+![Jalali Calendar Demo](images/jalali-calendar-02.png)
+![Jalali Calendar Demo](images/jalali-calendar-03.png)
+![Jalali Calendar Demo](images/jalali-calendar-04.png)
 
 ### Standalone Usage
 
