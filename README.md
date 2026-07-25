@@ -12,17 +12,18 @@ It supports both standalone usage and full data-aware binding, making it suitabl
 
 - Native Jalali (Persian) date picker for Delphi VCL
 - Fully compatible with Delphi 12
-- Dependency-free
+- No third-party dependencies
 - Supports both standalone and data-aware usage
 - Smart binding to `TDataSource`
-- Works with both text and date database fields
-- Flexible storage mode using `ValueMode`
+- Compatible with both text and date database fields
+- Flexible value storage using `ValueMode`
 - Direct date typing with automatic `/` insertion
 - Strict date validation on exit
-- Custom drop-down button icons
+- Customizable drop-down button icons
 - Dynamic layout adjustment for different icon sizes
-- Fast navigation between day, month, year, and decade views
-- Automatic focus on the current selected day when the popup opens
+- Fast navigation across day, month, year, and decade views
+- Automatically focuses the currently selected day when the popup opens
+- Built-in date increment helpers: `IncYear`, `IncMonth`, and `IncDay`
 
 ## Unique Capabilities
 
