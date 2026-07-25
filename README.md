@@ -137,10 +137,12 @@ Controls the background color of the editor.
 ## Usage
 ## Screenshot
 
-![Jalali Calendar Demo](images/jalali-calendar-01.png)
-![Jalali Calendar Demo](images/jalali-calendar-02.png)
-![Jalali Calendar Demo](images/jalali-calendar-03.png)
-![Jalali Calendar Demo](images/jalali-calendar-04.png)
+<p align="center">
+  <img src="images/jalali-calendar-01.png" alt="Jalali Calendar Demo 1" width="350" />
+  <img src="images/jalali-calendar-02.png" alt="Jalali Calendar Demo 2" width="350" />
+  <img src="images/jalali-calendar-03.png" alt="Jalali Calendar Demo 3" width="350" />
+  <img src="images/jalali-calendar-04.png" alt="Jalali Calendar Demo 4" width="350" />
+</p>
 
 ### Standalone Usage
 
