@@ -134,6 +134,9 @@ Controls the background color of the editor.
 4. Add the `Source` folder to your library path if needed.
 
 ## Usage
+## Screenshot
+
+![Jalali Calendar Demo](images/jalali-calendar-01.png)
 
 ### Standalone Usage
 
