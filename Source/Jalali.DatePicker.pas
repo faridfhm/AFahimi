@@ -1,4 +1,4 @@
-﻿unit Jalali.DatePicker;
+unit Jalali.DatePicker;
 
 interface
 
@@ -165,6 +165,9 @@ type
     procedure DropIconChanged(Sender: TObject);
     procedure CMFontChanged(var Message: TMessage); message CM_FONTCHANGED;
 
+   procedure WMKillFocus(var Message: TWMKillFocus);
+   procedure CMCancelMode(var Message: TMessage);
+
     procedure SyncTextBuffer;
     function IsValidJalaliStr(const S: string; out ADate: TJalaliDate): Boolean;
     procedure UpdateCaretPosition(AtStart: Boolean = False);
@@ -229,6 +232,36 @@ const
   CGridCols = 7;
   CTotalCells = CGridRows * CGridCols;
   C_PRODUCER_TEXT     = 'AFSoft2010@gmail.com';
+procedure TJalaliDatePicker.CMCancelMode(var Message: TMessage);
+begin
+  inherited;
+  if Assigned(FDropDown) and FDropDown.Visible then
+  begin
+    // با استفاده از TCMCancelMode به Sender دسترسی پیدا می‌کنیم
+    if (TCMCancelMode(Message).Sender <> Self) and
+       (TCMCancelMode(Message).Sender <> FDropDown) and
+       (TCMCancelMode(Message).Sender <> FDropDown.Calendar) then
+    begin
+      CloseDropDown;
+    end;
+  end;
+end;
+
+procedure TJalaliDatePicker.WMKillFocus(var Message: TWMKillFocus);
+begin
+  inherited;
+  if Assigned(FDropDown) and FDropDown.Visible then
+  begin
+    // بررسی می‌کنیم که اگر فوکوس به پنجره‌ای غیر از خود پاپ‌آپ یا فرزندانش منتقل شده باشد، آنگاه بسته شود
+    if (Message.FocusedWnd <> FDropDown.Handle) and
+       not Winapi.Windows.IsChild(FDropDown.Handle, Message.FocusedWnd) then
+    begin
+      CloseDropDown;
+    end;
+  end;
+end;
+
+
 
 function SameJalaliDate(const A, B: TJalaliDate): Boolean;
 begin
@@ -389,12 +422,25 @@ begin
   Result := Rect(L, T, L + CellW, T + FCellHeight);
 end;
 
-function TJalaliPopupCalendar.LogicalColAt(X, CellW: Integer): Integer;
+//function TJalaliPopupCalendar.LogicalColAt(X, CellW: Integer): Integer;
+//begin
+//  if CellW <= 0 then Exit(-1);
+//  Result := LogicalColOfVisual(X div CellW);
+//end;
+ function TJalaliPopupCalendar.LogicalColAt(X, CellW: Integer): Integer;
+var
+  VCol: Integer;
 begin
   if CellW <= 0 then Exit(-1);
-  Result := LogicalColOfVisual(X div CellW);
-end;
 
+  VCol := X div CellW;
+
+  // محدود کردن ستون بصری برای پیکسل‌های باقی‌مانده در لبه تقویم
+  if VCol >= CGridCols then
+    VCol := CGridCols - 1;
+
+  Result := LogicalColOfVisual(VCol);
+end;
 function TJalaliPopupCalendar.DaysInDisplayMonth: Integer;
 begin
   Result := TJalaliCalendar.DaysInMonth(FDisplayYear, FDisplayMonth);
@@ -730,13 +776,40 @@ begin
 end;
 
 // ... بقیه متدهای کامپوننت تقویم پاپ‌آپ بدون تغییر باقی می‌مانند ...
+//function TJalaliPopupCalendar.MonthIndexAtPos(X, Y: Integer; out AIndex: Integer): Boolean;
+//var GR: TRect; Row, Col: Integer;
+//begin
+//  Result := False; GR := GridRect;
+//  if not PtInRect(GR, Point(X, Y)) then Exit;
+//  Row := (Y - GR.Top) div (GR.Height div 4);
+//  Col := 2 - (X div (GR.Width div 3));
+//  if (Row >= 0) and (Row < 4) and (Col >= 0) and (Col < 3) then
+//  begin
+//    AIndex := Row * 3 + Col;
+//    Result := (AIndex >= 0) and (AIndex < 12);
+//  end;
+//end;
 function TJalaliPopupCalendar.MonthIndexAtPos(X, Y: Integer; out AIndex: Integer): Boolean;
-var GR: TRect; Row, Col: Integer;
+var
+  GR: TRect;
+  Row, Col, CellW, CellH: Integer;
 begin
-  Result := False; GR := GridRect;
+  Result := False;
+  GR := GridRect;
+
   if not PtInRect(GR, Point(X, Y)) then Exit;
-  Row := (Y - GR.Top) div (GR.Height div 4);
-  Col := 2 - (X div (GR.Width div 3));
+
+  CellH := GR.Height div 4;
+  CellW := GR.Width div 3;
+  if (CellW = 0) or (CellH = 0) then Exit;
+
+  Row := (Y - GR.Top) div CellH;
+  if Row > 3 then Row := 3; // جلوگیری از خطای لبه پایین
+
+  Col := (X - GR.Left) div CellW;
+  if Col > 2 then Col := 2; // جلوگیری از خطای لبه‌ها
+  Col := 2 - Col; // راست‌به‌چپ (RTL)
+
   if (Row >= 0) and (Row < 4) and (Col >= 0) and (Col < 3) then
   begin
     AIndex := Row * 3 + Col;
@@ -744,13 +817,41 @@ begin
   end;
 end;
 
-function TJalaliPopupCalendar.YearIndexAtPos(X, Y: Integer; out AIndex: Integer): Boolean;
-var GR: TRect; Row, Col: Integer;
+
+//function TJalaliPopupCalendar.YearIndexAtPos(X, Y: Integer; out AIndex: Integer): Boolean;
+//var GR: TRect; Row, Col: Integer;
+//begin
+//  Result := False; GR := GridRect;
+//  if not PtInRect(GR, Point(X, Y)) then Exit;
+//  Row := (Y - GR.Top) div (GR.Height div 3);
+//  Col := 3 - (X div (GR.Width div 4));
+//  if (Row >= 0) and (Row < 3) and (Col >= 0) and (Col < 4) then
+//  begin
+//    AIndex := Row * 4 + Col;
+//    Result := (AIndex >= 0) and (AIndex < 12);
+//  end;
+//end;
+   function TJalaliPopupCalendar.YearIndexAtPos(X, Y: Integer; out AIndex: Integer): Boolean;
+var
+  GR: TRect;
+  Row, Col, CellW, CellH: Integer;
 begin
-  Result := False; GR := GridRect;
+  Result := False;
+  GR := GridRect;
+
   if not PtInRect(GR, Point(X, Y)) then Exit;
-  Row := (Y - GR.Top) div (GR.Height div 3);
-  Col := 3 - (X div (GR.Width div 4));
+
+  CellH := GR.Height div 3;
+  CellW := GR.Width div 4;
+  if (CellW = 0) or (CellH = 0) then Exit;
+
+  Row := (Y - GR.Top) div CellH;
+  if Row > 2 then Row := 2; // جلوگیری از خطای لبه پایین
+
+  Col := (X - GR.Left) div CellW;
+  if Col > 3 then Col := 3; // جلوگیری از خطای لبه‌ها
+  Col := 3 - Col; // راست‌به‌چپ (RTL)
+
   if (Row >= 0) and (Row < 3) and (Col >= 0) and (Col < 4) then
   begin
     AIndex := Row * 4 + Col;
@@ -1712,6 +1813,8 @@ begin
   if not Assigned(FDropDown) then
   begin
     FDropDown := TJalaliDropDownForm.CreateNew(Self);
+    FDropDown.PopupMode := pmExplicit;
+    FDropDown.PopupParent := GetParentForm(Self);
     FDropDown.Calendar.OnSelectDate := PopupDateSelected;
   end;
 
@@ -1743,8 +1846,9 @@ begin
 
   FDropDown.SetBounds(P.X, P.Y, FDropDown.Width, FDropDown.Height);
 
-  Winapi.Windows.ShowWindow(FDropDown.Handle, SW_SHOWNOACTIVATE);
-  FDropDown.Visible := True;
+Winapi.Windows.SetWindowPos(FDropDown.Handle, HWND_TOPMOST, 0, 0, 0, 0,
+  SWP_NOMOVE or SWP_NOSIZE or SWP_NOACTIVATE or SWP_SHOWWINDOW);
+FDropDown.Visible := True;
 end;
 
 procedure TJalaliDatePicker.CloseDropDown;
