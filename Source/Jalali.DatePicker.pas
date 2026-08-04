@@ -132,6 +132,9 @@ type
     FOnChange: TJalaliDateChangeEvent;
     FDropIcon: TPicture;
 
+    FOwnerForm: TCustomForm;
+    FOwnerFormOrgProc: TWndMethod;
+
     FImages: TCustomImageList;
     FImageIndex: TImageIndex;
 
@@ -157,6 +160,10 @@ type
     procedure PopupDateSelected(Sender: TObject; const ADate: TJalaliDate);
     procedure ToggleDropDown;
     procedure CloseDropDown;
+
+    procedure HookOwnerForm;
+    procedure UnhookOwnerForm;
+    procedure OwnerFormWndProc(var Message: TMessage);
 
     function GetDropButtonWidth: Integer;
     function DropButtonRect: TRect;
@@ -1080,6 +1087,7 @@ end;
 
 destructor TJalaliDatePicker.Destroy;
 begin
+  UnhookOwnerForm;
   FDataLink.Free;
   FDataLink := nil;
   FDropIcon.Free;
@@ -1799,6 +1807,44 @@ begin
   Invalidate;
 end;
 
+procedure TJalaliDatePicker.HookOwnerForm;
+begin
+  // فرم مالک را پیدا می‌کنیم و در صورتی که قبلاً هوک نشده، WindowProc آن را
+  // موقتاً به متد خودمان تغییر می‌دهیم تا از جابجایی/تغییر اندازهٔ فرم مطلع شویم
+  FOwnerForm := GetParentForm(Self);
+  if Assigned(FOwnerForm) and not Assigned(FOwnerFormOrgProc) then
+  begin
+    FOwnerFormOrgProc := FOwnerForm.WindowProc;
+    FOwnerForm.WindowProc := OwnerFormWndProc;
+  end;
+end;
+
+procedure TJalaliDatePicker.UnhookOwnerForm;
+begin
+  if Assigned(FOwnerForm) and Assigned(FOwnerFormOrgProc) then
+  begin
+    FOwnerForm.WindowProc := FOwnerFormOrgProc;
+    FOwnerFormOrgProc := nil;
+  end;
+  FOwnerForm := nil;
+end;
+
+procedure TJalaliDatePicker.OwnerFormWndProc(var Message: TMessage);
+begin
+  // ابتدا اجازه می‌دهیم پردازش عادی پیام توسط فرم انجام شود
+  if Assigned(FOwnerFormOrgProc) then
+    FOwnerFormOrgProc(Message);
+
+  case Message.Msg of
+    WM_WINDOWPOSCHANGING, WM_MOVE, WM_SIZE:
+      begin
+        // به محض شروع جابجایی/تغییر اندازهٔ فرم، دراپ‌داون را می‌بندیم
+        if Assigned(FDropDown) and FDropDown.Visible then
+          CloseDropDown;
+      end;
+  end;
+end;
+
 procedure TJalaliDatePicker.ToggleDropDown;
 var
   P: TPoint;
@@ -1846,6 +1892,8 @@ begin
 
   FDropDown.SetBounds(P.X, P.Y, FDropDown.Width, FDropDown.Height);
 
+  HookOwnerForm;
+
 Winapi.Windows.SetWindowPos(FDropDown.Handle, HWND_TOPMOST, 0, 0, 0, 0,
   SWP_NOMOVE or SWP_NOSIZE or SWP_NOACTIVATE or SWP_SHOWWINDOW);
 FDropDown.Visible := True;
@@ -1855,6 +1903,7 @@ procedure TJalaliDatePicker.CloseDropDown;
 begin
   if Assigned(FDropDown) then
     FDropDown.Visible := False;
+  UnhookOwnerForm;
 end;
 
 procedure TJalaliDatePicker.PopupDateSelected(Sender: TObject; const ADate: TJalaliDate);
