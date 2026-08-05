@@ -22,20 +22,24 @@ uses
 
 type
   TDateValueMode = (vmJalali, vmMiladi);
+  TDateSelectPart = (dspYear, dspMonth, dspDay);
+  TJalaliDateFormat = (jdfYYYYMMDD, jdfYYMMDD, jdfYYYYMMDD_Dash);
 
   TJalaliValidationErrorEvent = procedure(Sender: TObject; const InvalidText: string; var KeepFocus: Boolean) of object;
 
-  // تقویم پاپ‌آپ فقط یک تفاوت با پنل معمولی دارد: هنگام AdjustDimensions
-  // اگر داخل یک فرم مستقل (TJalaliDropDownForm) باشد، اندازهٔ آن فرم را هم
-  // با خودش هماهنگ می‌کند. بقیهٔ منطق (رسم/ماوس/کیبورد) در کلاس پایه است.
   TJalaliPopupCalendar = class(TJalaliCalendarCore)
+  protected
+    procedure Click; override;
   public
     procedure AdjustDimensions; override;
   end;
 
+  TJalaliDatePicker = class;
+
   TJalaliDropDownForm = class(TForm)
   private
     FCalendar: TJalaliPopupCalendar;
+    FPicker: TJalaliDatePicker;
     procedure WMActivate(var Message: TWMActivate); message WM_ACTIVATE;
   protected
     procedure CreateParams(var Params: TCreateParams); override;
@@ -43,6 +47,7 @@ type
   public
     constructor CreateNew(AOwner: TComponent; Dummy: Integer = 0); override;
     property Calendar: TJalaliPopupCalendar read FCalendar;
+    property Picker: TJalaliDatePicker read FPicker write FPicker;
   end;
 
   TJalaliDatePicker = class(TCustomControl)
@@ -55,6 +60,9 @@ type
     FValidationErrorDisplay: Boolean;
     FOnValidationError: TJalaliValidationErrorEvent;
 
+    FDateFormat: TJalaliDateFormat;
+
+    FDropDownWidth: Integer;
     FDropDown: TJalaliDropDownForm;
     FOnChange: TJalaliDateChangeEvent;
     FDropIcon: TPicture;
@@ -67,6 +75,10 @@ type
 
     FDataLink: TFieldDataLink;
     FValueMode: TDateValueMode;
+
+    FSelectedPart: TDateSelectPart;
+    FInputBuffer: string;
+
     procedure DataChange(Sender: TObject);
     procedure UpdateData(Sender: TObject);
     function GetDataField: string;
@@ -74,6 +86,7 @@ type
     procedure SetDataField(const Value: string);
     procedure SetDataSource(Value: TDataSource);
     procedure SetValueMode(Value: TDateValueMode);
+    procedure SetDateFormat(Value: TJalaliDateFormat);
 
     function GetDateTime: TDateTime;
     function GetValue: string;
@@ -83,6 +96,7 @@ type
     procedure SetDropIcon(const Value: TPicture);
     procedure SetImages(const Value: TCustomImageList);
     procedure SetImageIndex(const Value: TImageIndex);
+    procedure SetDropDownWidth(const Value: Integer);
 
     procedure PopupDateSelected(Sender: TObject; const ADate: TJalaliDate);
     procedure ToggleDropDown;
@@ -99,14 +113,20 @@ type
     procedure DropIconChanged(Sender: TObject);
     procedure CMFontChanged(var Message: TMessage); message CM_FONTCHANGED;
 
-   procedure WMKillFocus(var Message: TWMKillFocus);
-   procedure CMCancelMode(var Message: TMessage);
+    procedure WMKillFocus(var Message: TWMKillFocus);
+    procedure CMCancelMode(var Message: TMessage);
 
     procedure SyncTextBuffer;
     function IsValidJalaliStr(const S: string; out ADate: TJalaliDate): Boolean;
-    procedure UpdateCaretPosition(AtStart: Boolean = False);
     procedure ClearDate;
     procedure SetUseTodayIfEmpty(Value: Boolean);
+
+    function GetPartRect(APart: TDateSelectPart): TRect;
+    procedure SetSelectedPart(Value: TDateSelectPart);
+    procedure AdjustPartValue(Delta: Integer);
+    procedure ProcessCharInput(Ch: Char);
+    function GetSeparatorChar: string;
+    function GetYearString: string;
   protected
     procedure Loaded; override;
     procedure Notification(AComponent: TComponent; Operation: TOperation); override;
@@ -125,11 +145,15 @@ type
     property Date: TJalaliDate read FDate write SetDate;
     property Value: string read GetValue write SetValue;
     property IsEmpty: Boolean read FIsEmpty;
+    property SelectedPart: TDateSelectPart read FSelectedPart write SetSelectedPart default dspYear;
   published
     property Producer: string read FProducer;
+    property DateFormat: TJalaliDateFormat read FDateFormat write SetDateFormat default jdfYYYYMMDD;
     property UseTodayIfEmpty: Boolean read FUseTodayIfEmpty write SetUseTodayIfEmpty default False;
     property ValidationErrorDisplay: Boolean read FValidationErrorDisplay write FValidationErrorDisplay default True;
     property OnValidationError: TJalaliValidationErrorEvent read FOnValidationError write FOnValidationError;
+
+    property DropDownWidth: Integer read FDropDownWidth write SetDropDownWidth default 0;
 
     property DataSource: TDataSource read GetDataSource write SetDataSource;
     property DataField: string read GetDataField write SetDataField;
@@ -157,18 +181,16 @@ type
     property OnChange: TJalaliDateChangeEvent read FOnChange write FOnChange;
   end;
 
-//procedure Register;
-
 implementation
 
 const
-  C_PRODUCER_TEXT     = 'AFSoft2010@gmail.com';
+  C_PRODUCER_TEXT = 'AFSoft2010@gmail.com';
+
 procedure TJalaliDatePicker.CMCancelMode(var Message: TMessage);
 begin
   inherited;
   if Assigned(FDropDown) and FDropDown.Visible then
   begin
-    // با استفاده از TCMCancelMode به Sender دسترسی پیدا می‌کنیم
     if (TCMCancelMode(Message).Sender <> Self) and
        (TCMCancelMode(Message).Sender <> FDropDown) and
        (TCMCancelMode(Message).Sender <> FDropDown.Calendar) then
@@ -183,7 +205,6 @@ begin
   inherited;
   if Assigned(FDropDown) and FDropDown.Visible then
   begin
-    // بررسی می‌کنیم که اگر فوکوس به پنجره‌ای غیر از خود پاپ‌آپ یا فرزندانش منتقل شده باشد، آنگاه بسته شود
     if (Message.FocusedWnd <> FDropDown.Handle) and
        not Winapi.Windows.IsChild(FDropDown.Handle, Message.FocusedWnd) then
     begin
@@ -192,19 +213,34 @@ begin
   end;
 end;
 
-
-
 function SameJalaliDate(const A, B: TJalaliDate): Boolean;
 begin
   Result := (A.Year = B.Year) and (A.Month = B.Month) and (A.Day = B.Day);
 end;
 
-function JalaliToDisplayText(const ADate: TJalaliDate): string;
+function JalaliToDisplayText(const ADate: TJalaliDate; AFormat: TJalaliDateFormat): string;
+var
+  Sep: string;
 begin
-  Result := Format('%.4d/%.2d/%.2d', [ADate.Year, ADate.Month, ADate.Day]);
+  if AFormat = jdfYYYYMMDD_Dash then
+    Sep := '-'
+  else
+    Sep := '/';
+
+  if AFormat = jdfYYMMDD then
+    Result := Format('%.2d%s%.2d%s%.2d', [ADate.Year mod 100, Sep, ADate.Month, Sep, ADate.Day])
+  else
+    Result := Format('%.4d%s%.2d%s%.2d', [ADate.Year, Sep, ADate.Month, Sep, ADate.Day]);
 end;
 
 { TJalaliPopupCalendar }
+
+procedure TJalaliPopupCalendar.Click;
+begin
+  inherited Click;
+  if Assigned(OnSelectDate) then
+    OnSelectDate(Self, SelectedDate);
+end;
 
 procedure TJalaliPopupCalendar.AdjustDimensions;
 begin
@@ -234,7 +270,7 @@ const
 begin
   inherited CreateParams(Params);
   Params.Style := Params.Style or WS_POPUP;
-  Params.ExStyle := Params.ExStyle or WS_EX_TOPMOST;
+  Params.ExStyle := Params.ExStyle or WS_EX_TOPMOST or WS_EX_NOACTIVATE;
   Params.WindowClass.style := Params.WindowClass.style or CS_DROPSHADOW;
 end;
 
@@ -250,8 +286,12 @@ end;
 procedure TJalaliDropDownForm.WMActivate(var Message: TWMActivate);
 begin
   inherited;
-  if Message.Active = WA_INACTIVE then
-    Visible := False;
+  if (Message.Active = WA_INACTIVE) and Assigned(FPicker) then
+  begin
+    if (Message.ActiveWindow <> FPicker.Handle) and 
+       not Winapi.Windows.IsChild(Handle, Message.ActiveWindow) then
+      FPicker.CloseDropDown;
+  end;
 end;
 
 { TJalaliDatePicker }
@@ -266,6 +306,11 @@ begin
   Color := clWindow;
   TabStop := True;
 
+  FDateFormat := jdfYYYYMMDD;
+  FDropDownWidth := 0;
+  FSelectedPart := dspYear;
+  FInputBuffer := '';
+
   FValidationErrorDisplay := True;
   FUseTodayIfEmpty := False;
 
@@ -273,7 +318,6 @@ begin
   FDropIcon.OnChange := DropIconChanged;
   FImageIndex := -1;
 
-  // مقدار دهی پیش‌فرض به تاریخ روز در زمان طراحی (یا در صورت عدم فعال بودن ویژگی UseTodayIfEmpty)
   FDate := TJalaliCalendar.Today;
   FIsEmpty := False;
 
@@ -294,10 +338,116 @@ begin
   inherited Destroy;
 end;
 
+procedure TJalaliDatePicker.SetDateFormat(Value: TJalaliDateFormat);
+begin
+  if FDateFormat <> Value then
+  begin
+    FDateFormat := Value;
+    SyncTextBuffer;
+    Invalidate;
+  end;
+end;
+
+function TJalaliDatePicker.GetSeparatorChar: string;
+begin
+  if FDateFormat = jdfYYYYMMDD_Dash then
+    Result := '-'
+  else
+    Result := '/';
+end;
+
+function TJalaliDatePicker.GetYearString: string;
+begin
+  if FDateFormat = jdfYYMMDD then
+    Result := Format('%.2d', [FDate.Year mod 100])
+  else
+    Result := Format('%.4d', [FDate.Year]);
+end;
+
+procedure TJalaliDatePicker.SetDropDownWidth(const Value: Integer);
+begin
+  if FDropDownWidth <> Value then
+  begin
+    FDropDownWidth := Value;
+    if Assigned(FDropDown) and FDropDown.Visible then
+    begin
+      if FDropDownWidth > 0 then
+        FDropDown.Width := FDropDownWidth;
+    end;
+  end;
+end;
+
+procedure TJalaliDatePicker.SetSelectedPart(Value: TDateSelectPart);
+begin
+  if FSelectedPart <> Value then
+  begin
+    FSelectedPart := Value;
+    FInputBuffer := '';
+    Invalidate;
+  end;
+end;
+
+function TJalaliDatePicker.GetPartRect(APart: TDateSelectPart): TRect;
+var
+  RText: TRect;
+  YearStr, MonthStr, DayStr, SepStr: string;
+  WYear, WMonth, WDay, WSep: Integer;
+  CurX: Integer;
+begin
+  RText := TextRect;
+  Canvas.Font.Assign(Self.Font);
+
+  YearStr  := GetYearString;
+  MonthStr := Format('%.2d', [FDate.Month]);
+  DayStr   := Format('%.2d', [FDate.Day]);
+  SepStr   := GetSeparatorChar;
+
+  WYear  := Canvas.TextWidth(YearStr);
+  WMonth := Canvas.TextWidth(MonthStr);
+  WDay   := Canvas.TextWidth(DayStr);
+  WSep   := Canvas.TextWidth(SepStr);
+
+  if UseRightToLeftAlignment then
+  begin
+    CurX := RText.Right;
+    case APart of
+      dspYear:
+        Result := Rect(CurX - WYear, RText.Top, CurX, RText.Bottom);
+      dspMonth:
+        begin
+          CurX := CurX - (WYear + WSep);
+          Result := Rect(CurX - WMonth, RText.Top, CurX, RText.Bottom);
+        end;
+      dspDay:
+        begin
+          CurX := CurX - (WYear + WSep + WMonth + WSep);
+          Result := Rect(CurX - WDay, RText.Top, CurX, RText.Bottom);
+        end;
+    end;
+  end
+  else
+  begin
+    CurX := RText.Left;
+    case APart of
+      dspYear:
+        Result := Rect(CurX, RText.Top, CurX + WYear, RText.Bottom);
+      dspMonth:
+        begin
+          CurX := CurX + WYear + WSep;
+          Result := Rect(CurX, RText.Top, CurX + WMonth, RText.Bottom);
+        end;
+      dspDay:
+        begin
+          CurX := CurX + WYear + WSep + WMonth + WSep;
+          Result := Rect(CurX, RText.Top, CurX + WDay, RText.Bottom);
+        end;
+    end;
+  end;
+end;
+
 procedure TJalaliDatePicker.Loaded;
 begin
   inherited Loaded;
-  // مدیریت مقدار دهی اولیه پس از لود کامل فرم و خاصیت‌ها در زمان اجرا یا طراحی
   if FUseTodayIfEmpty then
   begin
     FIsEmpty := True;
@@ -318,7 +468,6 @@ begin
   begin
     FUseTodayIfEmpty := Value;
 
-    // در زمان طراحی، مقدار دهی ویژوال فوراً به‌روز شود
     if (csDesigning in ComponentState) then
     begin
       if FUseTodayIfEmpty then
@@ -342,7 +491,7 @@ begin
   if FIsEmpty then
     FTextBuffer := ''
   else
-    FTextBuffer := JalaliToDisplayText(FDate);
+    FTextBuffer := JalaliToDisplayText(FDate, FDateFormat);
 end;
 
 procedure TJalaliDatePicker.ClearDate;
@@ -358,18 +507,21 @@ function TJalaliDatePicker.IsValidJalaliStr(const S: string; out ADate: TJalaliD
 var
   Parts: TArray<string>;
   Y, M, D: Integer;
+  Sep: Char;
 begin
   Result := False;
   ADate := FDate;
 
-  if Length(S) <> 10 then Exit;
-  if (S[5] <> '/') or (S[8] <> '/') then Exit;
+  if FDateFormat = jdfYYYYMMDD_Dash then Sep := '-' else Sep := '/';
 
-  Parts := S.Split(['/']);
+  if Length(S) < 8 then Exit;
+
+  Parts := S.Split([Sep]);
   if Length(Parts) <> 3 then Exit;
 
   if TryStrToInt(Parts[0], Y) and TryStrToInt(Parts[1], M) and TryStrToInt(Parts[2], D) then
   begin
+    if Y < 100 then Inc(Y, 1400); // برای فرمت های دو رقمی سال
     if (Y < 1) or (M < 1) or (M > 12) or (D < 1) then Exit;
     if D <= TJalaliCalendar.DaysInMonth(Y, M) then
     begin
@@ -445,10 +597,6 @@ begin
 end;
 
 procedure TJalaliDatePicker.DataChange(Sender: TObject);
-var
-  S: string;
-  DT: TDateTime;
-  JD: TJalaliDate;
 begin
   if (FDataLink.Field <> nil) and not (FDataLink.Field.IsNull) then
   begin
@@ -456,42 +604,6 @@ begin
     if FDataLink.Field.DataType in [ftDate, ftDateTime] then
     begin
       SetDateTime(FDataLink.Field.AsDateTime);
-    end
-    else
-    begin
-      S := FDataLink.Field.AsString;
-      if Length(S) = 10 then
-      begin
-        try
-          if FValueMode = vmJalali then
-          begin
-            JD.Year := StrToInt(Copy(S, 1, 4));
-            JD.Month := StrToInt(Copy(S, 6, 2));
-            JD.Day := StrToInt(Copy(S, 9, 2));
-            FDate := JD;
-          end
-          else
-          begin
-            DT := EncodeDate(StrToInt(Copy(S, 1, 4)), StrToInt(Copy(S, 6, 2)), StrToInt(Copy(S, 9, 2)));
-            FDate := TJalaliCalendar.DateTimeToJalali(DT);
-          end;
-        except
-          FDate := TJalaliCalendar.Today;
-        end;
-      end;
-    end;
-  end
-  else
-  begin
-    // در زمان اجرا، فیلدهای تهی دیتابیس همواره خالی باقی می‌مانند مگر در حالت طراحی بدون UseTodayIfEmpty
-    if (csDesigning in ComponentState) and (not FUseTodayIfEmpty) then
-    begin
-      FDate := TJalaliCalendar.Today;
-      FIsEmpty := False;
-    end
-    else
-    begin
-      FIsEmpty := True;
     end;
   end;
   SyncTextBuffer;
@@ -503,9 +615,7 @@ begin
   if (FDataLink.Field <> nil) and (FDataLink.CanModify) then
   begin
     if FIsEmpty then
-    begin
-      FDataLink.Field.Clear;
-    end
+      FDataLink.Field.Clear
     else
     begin
       if FDataLink.Field.DataType in [ftDate, ftDateTime] then
@@ -531,14 +641,12 @@ begin
   else if FValueMode = vmMiladi then
     Result := FormatDateTime('YYYY/MM/DD', GetDateTime)
   else
-    Result := JalaliToDisplayText(FDate);
+    Result := JalaliToDisplayText(FDate, FDateFormat);
 end;
 
 procedure TJalaliDatePicker.SetValue(const NewValue: string);
 var
   ParsedDate: TJalaliDate;
-  DT: TDateTime;
-  Y, M, D: Integer;
   TrimmedValue: string;
 begin
   TrimmedValue := Trim(NewValue);
@@ -547,53 +655,13 @@ begin
   begin
     FIsEmpty := True;
     ClearDate;
-
-    if FDataLink.Edit then
-    begin
-      FDataLink.Modified;
-      FDataLink.UpdateRecord;
-    end;
     Exit;
   end;
 
   if IsValidJalaliStr(TrimmedValue, ParsedDate) then
   begin
     FIsEmpty := False;
-    if FDataLink.Edit then
-    begin
-      SetDate(ParsedDate);
-      FDataLink.Modified;
-      FDataLink.UpdateRecord;
-    end
-    else
-    begin
-      SetDate(ParsedDate);
-    end;
-  end
-  else if FValueMode = vmMiladi then
-  begin
-    if (Length(TrimmedValue) = 10) and (TrimmedValue[5] = '/') and (TrimmedValue[8] = '/') then
-    begin
-      try
-        Y := StrToInt(Copy(TrimmedValue, 1, 4));
-        M := StrToInt(Copy(TrimmedValue, 6, 2));
-        D := StrToInt(Copy(TrimmedValue, 9, 2));
-        DT := EncodeDate(Y, M, D);
-
-        FIsEmpty := False;
-        if FDataLink.Edit then
-        begin
-          SetDateTime(DT);
-          FDataLink.Modified;
-          FDataLink.UpdateRecord;
-        end
-        else
-        begin
-          SetDateTime(DT);
-        end;
-      except
-      end;
-    end;
+    SetDate(ParsedDate);
   end;
 end;
 
@@ -613,9 +681,7 @@ end;
 procedure TJalaliDatePicker.SetDateTime(const Value: TDateTime);
 begin
   if Value = 0 then
-  begin
-    ClearDate;
-  end
+    ClearDate
   else
     SetDate(TJalaliCalendar.DateTimeToJalali(Value));
 end;
@@ -648,7 +714,10 @@ end;
 
 function TJalaliDatePicker.DropButtonRect: TRect;
 begin
-  Result := Rect(0, 0, GetDropButtonWidth, Height);
+  if UseRightToLeftAlignment then
+    Result := Rect(Width - GetDropButtonWidth, 0, Width, Height)
+  else
+    Result := Rect(0, 0, GetDropButtonWidth, Height);
 end;
 
 function TJalaliDatePicker.TextRect: TRect;
@@ -656,47 +725,74 @@ var
   BtnW: Integer;
 begin
   BtnW := GetDropButtonWidth;
-  Result := Rect(BtnW + 4, 2, Width - 4, Height - 2);
+  if UseRightToLeftAlignment then
+    Result := Rect(4, 2, Width - (BtnW + 4), Height - 2)
+  else
+    Result := Rect(BtnW + 4, 2, Width - 4, Height - 2);
 end;
 
 procedure TJalaliDatePicker.DrawCalendarIcon(const R: TRect);
 var
-  CX, CY, ImgX, ImgY: Integer;
+  ImgX, ImgY: Integer;
 begin
   if Assigned(FImages) and (FImageIndex >= 0) and (FImageIndex < FImages.Count) then
   begin
     ImgX := R.Left + (R.Width - FImages.Width) div 2;
     ImgY := R.Top + (R.Height - FImages.Height) div 2;
     FImages.Draw(Canvas, ImgX, ImgY, FImageIndex, Enabled);
-  end
-  else if (FDropIcon.Graphic <> nil) and (not FDropIcon.Graphic.Empty) then
-  begin
-    Canvas.Draw(R.Left + (R.Width - FDropIcon.Width) div 2,
-                R.Top + (R.Height - FDropIcon.Height) div 2, FDropIcon.Graphic);
-  end
-  else
-  begin
-    CX := (R.Left + R.Right) div 2;
-    CY := (R.Top + R.Bottom) div 2;
-    Canvas.Pen.Color := clGrayText;
-    Canvas.Brush.Style := bsClear;
-    Canvas.Rectangle(CX - 6, CY - 5, CX + 7, CY + 7);
-    Canvas.MoveTo(CX - 6, CY - 1); Canvas.LineTo(CX + 7, CY - 1);
-    Canvas.MoveTo(CX - 3, CY - 5); Canvas.LineTo(CX - 3, CY - 3);
-    Canvas.MoveTo(CX + 3, CY - 5); Canvas.LineTo(CX + 3, CY - 3);
   end;
 end;
 
 procedure TJalaliDatePicker.Paint;
 var
   R, RText: TRect;
-  S: string;
-  FormatFlags: TTextFormat;
-  BtnW: Integer;
+  YearStr, MonthStr, DayStr, SepStr: string;
+  WYear, WMonth, WDay, WSep: Integer;
+  BtnW, CurX: Integer;
+
+  procedure DrawSegment(const AText: string; AWidth: Integer; IsSelected: Boolean);
+  var
+    SegR: TRect;
+    Flags: UINT;
+  begin
+    if UseRightToLeftAlignment then
+      SegR := Rect(CurX - AWidth, RText.Top, CurX, RText.Bottom)
+    else
+      SegR := Rect(CurX, RText.Top, CurX + AWidth, RText.Bottom);
+
+    Flags := DT_CENTER or DT_VCENTER or DT_SINGLELINE or DT_NOPREFIX;
+    if UseRightToLeftAlignment then
+      Flags := Flags or DT_RTLREADING;
+
+    if IsSelected and Focused and Enabled and not FIsEmpty then
+    begin
+      Canvas.Brush.Style := bsSolid;
+      Canvas.Brush.Color := clHighlight;
+      Canvas.FillRect(SegR);
+
+      Canvas.Font.Color := clHighlightText;
+      Canvas.Brush.Style := bsClear;
+      Winapi.Windows.DrawText(Canvas.Handle, PChar(AText), Length(AText), SegR, Flags);
+
+      Canvas.Font.Assign(Self.Font);
+      if not Enabled then Canvas.Font.Color := clGrayText;
+    end
+    else
+    begin
+      Canvas.Brush.Style := bsClear;
+      Winapi.Windows.DrawText(Canvas.Handle, PChar(AText), Length(AText), SegR, Flags);
+    end;
+
+    if UseRightToLeftAlignment then
+      Dec(CurX, AWidth)
+    else
+      Inc(CurX, AWidth);
+  end;
+
 begin
   inherited;
   Canvas.Brush.Color := Color;
-  if Enabled then Canvas.Brush.Color := Color else Canvas.Brush.Color := clBtnFace;
+  if not Enabled then Canvas.Brush.Color := clBtnFace;
   Canvas.Brush.Style := bsSolid;
   Canvas.FillRect(ClientRect);
 
@@ -706,15 +802,11 @@ begin
   BtnW := GetDropButtonWidth;
 
   if UseRightToLeftAlignment then
-  begin
-    R := Rect(Width - BtnW, 0, Width, Height);
-    RText := Rect(4, 2, Width - (BtnW + 4), Height - 2);
-  end
+    R := Rect(Width - BtnW, 0, Width, Height)
   else
-  begin
     R := Rect(0, 0, BtnW, Height);
-    RText := Rect(BtnW + 4, 2, Width - 4, Height - 2);
-  end;
+
+  RText := TextRect;
 
   Canvas.Brush.Color := $00F3F3F3;
   Canvas.FillRect(Rect(R.Left + 1, R.Top + 1, R.Right - 1, R.Bottom - 1));
@@ -735,21 +827,26 @@ begin
   Canvas.Font.Assign(Self.Font);
   if not Enabled then Canvas.Font.Color := clGrayText;
 
-  if Focused then
-    S := FTextBuffer
-  else if FIsEmpty then
-    S := ''
-  else
-    S := JalaliToDisplayText(FDate);
+  YearStr  := GetYearString;
+  MonthStr := Format('%.2d', [FDate.Month]);
+  DayStr   := Format('%.2d', [FDate.Day]);
+  SepStr   := GetSeparatorChar;
 
-  Canvas.Brush.Style := bsClear;
+  WYear  := Canvas.TextWidth(YearStr);
+  WMonth := Canvas.TextWidth(MonthStr);
+  WDay   := Canvas.TextWidth(DayStr);
+  WSep   := Canvas.TextWidth(SepStr);
 
   if UseRightToLeftAlignment then
-    FormatFlags := [tfLeft, tfVerticalCenter, tfSingleLine]
+    CurX := RText.Right
   else
-    FormatFlags := [tfRight, tfVerticalCenter, tfSingleLine];
+    CurX := RText.Left;
 
-  Canvas.TextRect(RText, S, FormatFlags);
+  DrawSegment(YearStr, WYear, FSelectedPart = dspYear);
+  DrawSegment(SepStr, WSep, False);
+  DrawSegment(MonthStr, WMonth, FSelectedPart = dspMonth);
+  DrawSegment(SepStr, WSep, False);
+  DrawSegment(DayStr, WDay, FSelectedPart = dspDay);
 
   if Focused then
   begin
@@ -763,26 +860,31 @@ end;
 
 procedure TJalaliDatePicker.MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
 var
-  DropRect: TRect;
-  BtnW: Integer;
+  DropR, RYear, RMonth, RDay: TRect;
+  P: TPoint;
 begin
   inherited;
   if Button = mbLeft then
   begin
-    if CanFocus then
+    if CanFocus then SetFocus;
+
+    DropR := DropButtonRect;
+
+    if PtInRect(DropR, Point(X, Y)) then
     begin
-      SetFocus;
-      Invalidate;
-    end;
-
-    BtnW := GetDropButtonWidth;
-    if UseRightToLeftAlignment then
-      DropRect := Rect(Width - BtnW, 0, Width, Height)
-    else
-      DropRect := Rect(0, 0, BtnW, Height);
-
-    if PtInRect(DropRect, Point(X, Y)) then
       ToggleDropDown;
+    end
+    else
+    begin
+      P := Point(X, Y);
+      RYear := GetPartRect(dspYear);
+      RMonth := GetPartRect(dspMonth);
+      RDay := GetPartRect(dspDay);
+
+      if PtInRect(RYear, P) then SetSelectedPart(dspYear)
+      else if PtInRect(RMonth, P) then SetSelectedPart(dspMonth)
+      else if PtInRect(RDay, P) then SetSelectedPart(dspDay);
+    end;
   end;
 end;
 
@@ -792,73 +894,106 @@ begin
   Message.Result := Message.Result or DLGC_WANTCHARS or DLGC_WANTARROWS or DLGC_HASSETSEL;
 end;
 
-procedure TJalaliDatePicker.UpdateCaretPosition(AtStart: Boolean);
+procedure TJalaliDatePicker.AdjustPartValue(Delta: Integer);
 var
-  TextW: Integer;
+  Y, M, D, MaxD: Integer;
+  NewDate: TJalaliDate;
 begin
-  if not Focused then Exit;
+  Y := FDate.Year;
+  M := FDate.Month;
+  D := FDate.Day;
 
-  if AtStart or FIsEmpty then
-    TextW := 0
-  else
-  begin
-    Canvas.Font.Assign(Self.Font);
-    TextW := Canvas.TextWidth(FTextBuffer);
+  case FSelectedPart of
+    dspYear:  Inc(Y, Delta);
+    dspMonth:
+      begin
+        Inc(M, Delta);
+        if M > 12 then M := 1
+        else if M < 1 then M := 12;
+      end;
+    dspDay:
+      begin
+        MaxD := TJalaliCalendar.DaysInMonth(Y, M);
+        Inc(D, Delta);
+        if D > MaxD then D := 1
+        else if D < 1 then D := MaxD;
+      end;
   end;
 
-  if UseRightToLeftAlignment then
-    SetCaretPos(4 + TextW, 3)
-  else
-    SetCaretPos(Max(4, Width - GetDropButtonWidth - 6 - TextW), 3);
+  MaxD := TJalaliCalendar.DaysInMonth(Y, M);
+  if D > MaxD then D := MaxD;
+
+  if not FDataLink.Editing then FDataLink.Edit;
+
+  NewDate.Year := Y;
+  NewDate.Month := M;
+  NewDate.Day := D;
+  SetDate(NewDate);
+end;
+
+procedure TJalaliDatePicker.ProcessCharInput(Ch: Char);
+var
+  Val, MaxLen, Y, M, D, MaxD: Integer;
+  NewDate: TJalaliDate;
+begin
+  if not CharInSet(Ch, ['0'..'9']) then Exit;
+
+  case FSelectedPart of
+    dspYear: 
+      if FDateFormat = jdfYYMMDD then MaxLen := 2 else MaxLen := 4;
+    dspMonth, dspDay: MaxLen := 2;
+  end;
+
+  FInputBuffer := FInputBuffer + Ch;
+  Val := StrToIntDef(FInputBuffer, 0);
+
+  Y := FDate.Year;
+  M := FDate.Month;
+  D := FDate.Day;
+
+  case FSelectedPart of
+    dspYear: 
+      begin
+        if FDateFormat = jdfYYMMDD then
+          Y := 1400 + Val
+        else
+          Y := Val;
+      end;
+    dspMonth: if (Val >= 1) and (Val <= 12) then M := Val;
+    dspDay:
+      begin
+        MaxD := TJalaliCalendar.DaysInMonth(Y, M);
+        if (Val >= 1) and (Val <= MaxD) then D := Val;
+      end;
+  end;
+
+  if not FDataLink.Editing then FDataLink.Edit;
+
+  NewDate.Year := Y;
+  NewDate.Month := M;
+  NewDate.Day := D;
+  SetDate(NewDate);
+
+  if Length(FInputBuffer) >= MaxLen then
+  begin
+    FInputBuffer := '';
+    if FSelectedPart = dspYear then SetSelectedPart(dspMonth)
+    else if FSelectedPart = dspMonth then SetSelectedPart(dspDay);
+  end;
 end;
 
 procedure TJalaliDatePicker.KeyPress(var Key: Char);
-var
-  ParsedDate: TJalaliDate;
 begin
   inherited KeyPress(Key);
 
-  if Key < #32 then Exit;
-
-  if not CharInSet(Key, ['0'..'9']) then
+  if Key >= #32 then
   begin
+    ProcessCharInput(Key);
     Key := #0;
-    Exit;
   end;
-
-  if Length(FTextBuffer) >= 10 then
-  begin
-    Key := #0;
-    Exit;
-  end;
-
-  if not FDataLink.Editing then
-    FDataLink.Edit;
-
-  FIsEmpty := False;
-  FTextBuffer := FTextBuffer + Key;
-
-  if (Length(FTextBuffer) = 4) or (Length(FTextBuffer) = 7) then
-    FTextBuffer := FTextBuffer + '/';
-
-  Invalidate;
-  UpdateCaretPosition(False);
-
-  if (Length(FTextBuffer) = 10) and Assigned(FDropDown) and FDropDown.Visible then
-  begin
-    if IsValidJalaliStr(FTextBuffer, ParsedDate) then
-    begin
-      FDropDown.Calendar.SelectedDate := ParsedDate;
-      FDropDown.Calendar.HoverIndex := (ParsedDate.Day - 1) + FDropDown.Calendar.FirstDayOffset_Sat0;
-    end;
-  end;
-
-  Key := #0;
 end;
 
 procedure TJalaliDatePicker.KeyDown(var Key: Word; Shift: TShiftState);
-var
-  L: Integer;
 begin
   if (Key = VK_DOWN) and (ssAlt in Shift) then
   begin
@@ -867,52 +1002,47 @@ begin
     Exit;
   end;
 
-  if Key = VK_RETURN then
+  if Key = VK_UP then
   begin
-    DoExit;
+    AdjustPartValue(1);
     Key := 0;
     Exit;
   end;
 
-  if Assigned(FDropDown) and FDropDown.Visible then
+  if Key = VK_DOWN then
   begin
-    if Key in [VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT] then
+    AdjustPartValue(-1);
+    Key := 0;
+    Exit;
+  end;
+
+  if Key = VK_LEFT then
+  begin
+    if UseRightToLeftAlignment then
     begin
-      FDropDown.Calendar.DoKeyDown(Key, Shift);
-      Key := 0;
-      Exit;
+      if FSelectedPart = dspYear then SetSelectedPart(dspMonth)
+      else if FSelectedPart = dspMonth then SetSelectedPart(dspDay);
+    end
+    else
+    begin
+      if FSelectedPart = dspDay then SetSelectedPart(dspMonth)
+      else if FSelectedPart = dspMonth then SetSelectedPart(dspYear);
     end;
-  end;
-
-  // پاک کردن کامل تاریخ با زدن Delete زمانی که فیلد هنوز فوکوس دارد و کاراکتری ندارد
-  if (Key = VK_DELETE) and (FTextBuffer = '') then
-  begin
-    if not FDataLink.Editing then FDataLink.Edit;
-    ClearDate;
     Key := 0;
     Exit;
   end;
 
-  if Key = VK_BACK then
+  if Key = VK_RIGHT then
   begin
-    L := Length(FTextBuffer);
-    if L > 0 then
+    if UseRightToLeftAlignment then
     begin
-      if not FDataLink.Editing then
-        FDataLink.Edit;
-
-      if (L = 6) or (L = 9) then
-        Delete(FTextBuffer, L - 1, 2)
-      else
-        Delete(FTextBuffer, L, 1);
-
-      if FTextBuffer = '' then
-      begin
-        FIsEmpty := True; // در زمان ویرایش با بک‌اسپیس، همواره فیلد خالی می‌شود تا کاربر بتواند فیلد را کاملا پاک کند
-      end;
-
-      Invalidate;
-      UpdateCaretPosition(False);
+      if FSelectedPart = dspDay then SetSelectedPart(dspMonth)
+      else if FSelectedPart = dspMonth then SetSelectedPart(dspYear);
+    end
+    else
+    begin
+      if FSelectedPart = dspYear then SetSelectedPart(dspMonth)
+      else if FSelectedPart = dspMonth then SetSelectedPart(dspDay);
     end;
     Key := 0;
     Exit;
@@ -925,78 +1055,18 @@ procedure TJalaliDatePicker.DoEnter;
 begin
   inherited DoEnter;
   SyncTextBuffer;
-
-  CreateCaret(Handle, 0, 2, Height - 6);
-  UpdateCaretPosition(FIsEmpty);
-  ShowCaret(Handle);
-
+  HideCaret(Handle);
+  DestroyCaret;
+  FSelectedPart := dspYear;
+  FInputBuffer := '';
   Invalidate;
 end;
 
 procedure TJalaliDatePicker.DoExit;
-var
-  ParsedDate: TJalaliDate;
-  KeepFocus: Boolean;
 begin
   HideCaret(Handle);
   DestroyCaret;
-
-  KeepFocus := False;
-
-  if FTextBuffer = '' then
-  begin
-    FIsEmpty := True;
-    if FDataLink.Edit then
-    begin
-      FDataLink.Modified;
-      FDataLink.UpdateRecord;
-    end;
-  end
-  else if IsValidJalaliStr(FTextBuffer, ParsedDate) then
-  begin
-    FIsEmpty := False;
-    if not SameJalaliDate(FDate, ParsedDate) then
-    begin
-      if FDataLink.Edit then
-      begin
-        SetDate(ParsedDate);
-        FDataLink.Modified;
-        FDataLink.UpdateRecord;
-      end
-      else
-        SetDate(ParsedDate);
-    end;
-  end
-  else
-  begin
-    if Assigned(FOnValidationError) then
-    begin
-      FOnValidationError(Self, FTextBuffer, KeepFocus);
-    end
-    else if FValidationErrorDisplay then
-    begin
-      Application.MessageBox(
-        PChar(Format('تاریخ وارد شده (%s) معتبر نمی‌باشد. لطفاً یک تاریخ صحیح وارد کنید.', [FTextBuffer])),
-        'خطای اعتبارسنجی',
-        MB_OK or MB_ICONWARNING or MB_RTLREADING or MB_RIGHT
-      );
-      KeepFocus := True;
-    end;
-
-    if KeepFocus then
-    begin
-      if CanFocus then
-      begin
-        SetFocus;
-        Exit;
-      end;
-    end
-    else
-    begin
-      SyncTextBuffer;
-    end;
-  end;
-
+  FInputBuffer := '';
   inherited DoExit;
   Invalidate;
 end;
@@ -1009,8 +1079,6 @@ end;
 
 procedure TJalaliDatePicker.HookOwnerForm;
 begin
-  // فرم مالک را پیدا می‌کنیم و در صورتی که قبلاً هوک نشده، WindowProc آن را
-  // موقتاً به متد خودمان تغییر می‌دهیم تا از جابجایی/تغییر اندازهٔ فرم مطلع شویم
   FOwnerForm := GetParentForm(Self);
   if Assigned(FOwnerForm) and not Assigned(FOwnerFormOrgProc) then
   begin
@@ -1031,17 +1099,12 @@ end;
 
 procedure TJalaliDatePicker.OwnerFormWndProc(var Message: TMessage);
 begin
-  // ابتدا اجازه می‌دهیم پردازش عادی پیام توسط فرم انجام شود
   if Assigned(FOwnerFormOrgProc) then
     FOwnerFormOrgProc(Message);
 
   case Message.Msg of
     WM_MOVE, WM_SIZE:
       begin
-        // به محض شروع جابجایی/تغییر اندازهٔ واقعیِ فرم، دراپ‌داون را می‌بندیم.
-        // عمداً WM_WINDOWPOSCHANGING اینجا بررسی نمی‌شود، چون این پیام برای هر
-        // تغییر ترتیب Z (مثلاً هنگام کلیک داخل خودِ دراپ‌داون) هم ارسال می‌شود
-        // و باعث بسته شدن زودهنگام/کاذب دراپ‌داون قبل از ثبت کلیک می‌شد.
         if Assigned(FDropDown) and FDropDown.Visible then
           CloseDropDown;
       end;
@@ -1062,6 +1125,7 @@ begin
   if not Assigned(FDropDown) then
   begin
     FDropDown := TJalaliDropDownForm.CreateNew(Self);
+    FDropDown.Picker := Self;
     FDropDown.PopupMode := pmExplicit;
     FDropDown.PopupParent := GetParentForm(Self);
     FDropDown.Calendar.OnSelectDate := PopupDateSelected;
@@ -1075,6 +1139,9 @@ begin
     FDropDown.Calendar.SelectedDate := FDate;
 
   FDropDown.Calendar.AdjustDimensions;
+
+  if FDropDownWidth > 0 then
+    FDropDown.Width := FDropDownWidth;
 
   Offset := FDropDown.Calendar.FirstDayOffset_Sat0;
   if FIsEmpty then
@@ -1097,9 +1164,9 @@ begin
 
   HookOwnerForm;
 
-Winapi.Windows.SetWindowPos(FDropDown.Handle, HWND_TOPMOST, 0, 0, 0, 0,
-  SWP_NOMOVE or SWP_NOSIZE or SWP_NOACTIVATE or SWP_SHOWWINDOW);
-FDropDown.Visible := True;
+  Winapi.Windows.SetWindowPos(FDropDown.Handle, HWND_TOPMOST, 0, 0, 0, 0,
+    SWP_NOMOVE or SWP_NOSIZE or SWP_NOACTIVATE or SWP_SHOWWINDOW);
+  FDropDown.Visible := True;
 end;
 
 procedure TJalaliDatePicker.CloseDropDown;
@@ -1112,22 +1179,15 @@ end;
 procedure TJalaliDatePicker.PopupDateSelected(Sender: TObject; const ADate: TJalaliDate);
 begin
   FIsEmpty := False;
-  if FDataLink.Edit then
+  if FDataLink.Editing or FDataLink.Edit then
   begin
     SetDate(ADate);
     FDataLink.Modified;
     FDataLink.UpdateRecord;
-  end
-  else
-  begin
-    SetDate(ADate);
   end;
+  SetDate(ADate);
   CloseDropDown;
+  if CanFocus then SetFocus;
 end;
-
-//procedure Register;
-//begin
-//  RegisterComponents('Jalali DatePicker', [TJalaliDatePicker]);
-//end;
 
 end.
