@@ -237,10 +237,11 @@ end;
 
 procedure TJalaliPopupCalendar.Click;
 begin
-  inherited Click;
-  if Assigned(OnSelectDate) then
+inherited Click;
+  if (HoverIndex >= 0) and Assigned(OnSelectDate) then
+  begin
     OnSelectDate(Self, SelectedDate);
-end;
+  end;end;
 
 procedure TJalaliPopupCalendar.AdjustDimensions;
 begin
@@ -288,7 +289,7 @@ begin
   inherited;
   if (Message.Active = WA_INACTIVE) and Assigned(FPicker) then
   begin
-    if (Message.ActiveWindow <> FPicker.Handle) and 
+    if (Message.ActiveWindow <> FPicker.Handle) and
        not Winapi.Windows.IsChild(Handle, Message.ActiveWindow) then
       FPicker.CloseDropDown;
   end;
@@ -521,7 +522,7 @@ begin
 
   if TryStrToInt(Parts[0], Y) and TryStrToInt(Parts[1], M) and TryStrToInt(Parts[2], D) then
   begin
-    if Y < 100 then Inc(Y, 1400); // برای فرمت های دو رقمی سال
+    if Y < 100 then Inc(Y, 1400);
     if (Y < 1) or (M < 1) or (M > 12) or (D < 1) then Exit;
     if D <= TJalaliCalendar.DaysInMonth(Y, M) then
     begin
@@ -939,7 +940,7 @@ begin
   if not CharInSet(Ch, ['0'..'9']) then Exit;
 
   case FSelectedPart of
-    dspYear: 
+    dspYear:
       if FDateFormat = jdfYYMMDD then MaxLen := 2 else MaxLen := 4;
     dspMonth, dspDay: MaxLen := 2;
   end;
@@ -952,7 +953,7 @@ begin
   D := FDate.Day;
 
   case FSelectedPart of
-    dspYear: 
+    dspYear:
       begin
         if FDateFormat = jdfYYMMDD then
           Y := 1400 + Val
