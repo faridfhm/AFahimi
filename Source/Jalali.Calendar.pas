@@ -1,4 +1,4 @@
-﻿unit Jalali.Calendar;
+unit Jalali.Calendar;
 
 interface
 
@@ -14,10 +14,13 @@ type
     function IsValid: Boolean;
     function ToDisplayString: string;
 
-    { متدهای جدید افزایشی و کاهشی }
+    { متدهای افزایشی و کاهشی }
     function IncDay(NumberOfDays: Integer = 1): TJalaliDate;
     function IncMonth(NumberOfMonths: Integer = 1): TJalaliDate;
     function IncYear(NumberOfYears: Integer = 1): TJalaliDate;
+
+    { متد محاسبه فاصله تا یک تاریخ دیگر }
+    function DaysBetween(const AOtherDate: TJalaliDate): Integer;
   end;
 
   TJalaliCalendar = class
@@ -33,6 +36,9 @@ type
     class function JalaliToDateTime(JYear, JMonth, JDay: Integer): TDateTime; static;
 
     class function Today: TJalaliDate; static;
+
+    { متد محاسبه تعداد روز بین دو تاریخ جلالی }
+    class function DaysBetween(const AFromDate, AToDate: TJalaliDate): Integer; overload; static;
   end;
 
 implementation
@@ -213,7 +219,6 @@ function TJalaliDate.IncDay(NumberOfDays: Integer): TJalaliDate;
 var
   DT: TDateTime;
 begin
-  // تبدیل به میلادی، افزودن روز (مقدار منفی برای کاهش) و تبدیل مجدد به جلالی
   DT := TJalaliCalendar.JalaliToGregorian(Self);
   DT := System.DateUtils.IncDay(DT, NumberOfDays);
   Result := TJalaliCalendar.DateTimeToJalali(DT);
@@ -224,12 +229,10 @@ var
   NewYear, NewMonth, NewDay: Integer;
   MaxDays: Integer;
 begin
-  // محاسبه ماه و سال جدید بدون در نظر گرفتن روز
   NewMonth := Month + NumberOfMonths - 1;
   NewYear := Year + FloorDiv(NewMonth, 12);
   NewMonth := FloorMod(NewMonth, 12) + 1;
 
-  // بررسی اینکه روز فعلی در ماه جدید معتبر است یا خیر (کنترل انتهای ماه)
   MaxDays := TJalaliCalendar.DaysInMonth(NewYear, NewMonth);
   if Day > MaxDays then
     NewDay := MaxDays
@@ -245,13 +248,17 @@ var
 begin
   NewYear := Year + NumberOfYears;
 
-  // مدیریت حالت خاص: اگر تاریخ ۳۰ اسفند در سال کبیسه باشد و سال جدید کبیسه نباشد، روز به ۲۹ تغییر می‌کند
   if (Month = 12) and (Day = 30) and (not TJalaliCalendar.IsLeapYear(NewYear)) then
     NewDay := 29
   else
     NewDay := Day;
 
   Result := TJalaliDate.Create(NewYear, Month, NewDay);
+end;
+
+function TJalaliDate.DaysBetween(const AOtherDate: TJalaliDate): Integer;
+begin
+  Result := TJalaliCalendar.DaysBetween(Self, AOtherDate);
 end;
 
 { ===== TJalaliCalendar ===== }
@@ -313,6 +320,19 @@ end;
 class function TJalaliCalendar.Today: TJalaliDate;
 begin
   Result := DateTimeToJalali(Date);
+end;
+
+class function TJalaliCalendar.DaysBetween(const AFromDate, AToDate: TJalaliDate): Integer;
+var
+  JDN1, JDN2: Integer;
+begin
+  if (not AFromDate.IsValid) or (not AToDate.IsValid) then
+    raise EConvertError.Create('تاریخ جلالی نامعتبر است');
+
+  JDN1 := RawJalaliToJDN(AFromDate.Year, AFromDate.Month, AFromDate.Day);
+  JDN2 := RawJalaliToJDN(AToDate.Year, AToDate.Month, AToDate.Day);
+
+  Result := Abs(JDN2 - JDN1);
 end;
 
 end.
