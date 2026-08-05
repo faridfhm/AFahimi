@@ -67,9 +67,6 @@ type
     FOnChange: TJalaliDateChangeEvent;
     FDropIcon: TPicture;
 
-    FOwnerForm: TCustomForm;
-    FOwnerFormOrgProc: TWndMethod;
-
     FImages: TCustomImageList;
     FImageIndex: TImageIndex;
 
@@ -104,7 +101,6 @@ type
 
     procedure HookOwnerForm;
     procedure UnhookOwnerForm;
-    procedure OwnerFormWndProc(var Message: TMessage);
 
     function GetDropButtonWidth: Integer;
     function DropButtonRect: TRect;
@@ -128,6 +124,10 @@ type
     procedure ProcessCharInput(Ch: Char);
     function GetSeparatorChar: string;
     function GetYearString: string;
+
+    procedure ValidateAndApplyInput;
+    procedure SelectPartAt(X: Integer);
+    function DoMouseWheel(Shift: TShiftState; WheelDelta: Integer; MousePos: TPoint): Boolean; override;
   protected
     procedure Loaded; override;
     procedure Notification(AComponent: TComponent; Operation: TOperation); override;
@@ -184,8 +184,52 @@ type
 
 implementation
 
+function SetWindowSubclass(hWnd: HWND; pfnSubclass: Pointer; uIdSubclass: UINT_PTR; dwRefData: DWORD_PTR): BOOL; stdcall; external 'comctl32.dll';
+function DefSubclassProc(hWnd: HWND; uMsg: UINT; wParam: WPARAM; lParam: LPARAM): LRESULT; stdcall; external 'comctl32.dll';
+function RemoveWindowSubclass(hWnd: HWND; pfnSubclass: Pointer; uIdSubclass: UINT_PTR): BOOL; stdcall; external 'comctl32.dll';
+
 const
   C_PRODUCER_TEXT = 'AFSoft2010@gmail.com';
+
+function OwnerFormSubclassProc(hWnd: HWND; uMsg: UINT; wParam: WPARAM; lParam: LPARAM;
+  uIdSubclass: UINT_PTR; dwRefData: DWORD_PTR): LRESULT; stdcall;
+var
+  Picker: TJalaliDatePicker;
+  Pt: TPoint;
+  PickerRect, DropRect: TRect;
+begin
+  Picker := TJalaliDatePicker(dwRefData);
+
+  case uMsg of
+    WM_MOVE, WM_SIZE:
+      begin
+        if Assigned(Picker) and Assigned(Picker.FDropDown) and Picker.FDropDown.Visible then
+          Picker.CloseDropDown;
+      end;
+    WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_MBUTTONDOWN, WM_NCLBUTTONDOWN:
+      begin
+        if Assigned(Picker) and Assigned(Picker.FDropDown) and Picker.FDropDown.Visible then
+        begin
+          // اصلاح: استفاده از LOWORD/HIWORD به جای GET_X_LPARAM
+          Pt.X := LOWORD(lParam);
+          Pt.Y := HIWORD(lParam);
+          Winapi.Windows.ClientToScreen(hWnd, Pt);
+
+          PickerRect.TopLeft := Picker.ClientToScreen(Point(0, 0));
+          PickerRect.BottomRight := Picker.ClientToScreen(Point(Picker.Width, Picker.Height));
+
+          DropRect.TopLeft := Point(Picker.FDropDown.Left, Picker.FDropDown.Top);
+          DropRect.BottomRight := Point(Picker.FDropDown.Left + Picker.FDropDown.Width,
+                                         Picker.FDropDown.Top + Picker.FDropDown.Height);
+
+          if not PtInRect(PickerRect, Pt) and not PtInRect(DropRect, Pt) then
+            Picker.CloseDropDown;
+        end;
+      end;
+  end;
+
+  Result := DefSubclassProc(hWnd, uMsg, wParam, lParam);
+end;
 
 procedure TJalaliDatePicker.CMCancelMode(var Message: TMessage);
 begin
@@ -321,7 +365,6 @@ begin
   FDropIcon.OnChange := DropIconChanged;
   FImageIndex := -1;
 
-  // مقداردهی اولیه به صورت خالی جهت پشتیبانی از UseTodayIfEmpty
   FDate := TJalaliCalendar.Today;
   FIsEmpty := True;
 
@@ -336,8 +379,12 @@ end;
 destructor TJalaliDatePicker.Destroy;
 begin
   UnhookOwnerForm;
+  if Assigned(FDropDown) then
+  begin
+    FDropDown.Visible := False;
+    FreeAndNil(FDropDown);
+  end;
   FDataLink.Free;
-  FDataLink := nil;
   FDropIcon.Free;
   inherited Destroy;
 end;
@@ -432,10 +479,10 @@ end;
 procedure TJalaliDatePicker.Loaded;
 begin
   inherited Loaded;
-  if FUseTodayIfEmpty then
+  if FIsEmpty and FUseTodayIfEmpty then
   begin
-    FIsEmpty := False;
     FDate := TJalaliCalendar.Today;
+    FIsEmpty := False;
   end;
   SyncTextBuffer;
   Invalidate;
@@ -629,6 +676,7 @@ procedure TJalaliDatePicker.SetValue(const NewValue: string);
 var
   ParsedDate: TJalaliDate;
   TrimmedValue: string;
+  KeepFocus: Boolean;
 begin
   TrimmedValue := Trim(NewValue);
 
@@ -642,6 +690,14 @@ begin
   begin
     FIsEmpty := False;
     SetDate(ParsedDate);
+  end
+  else
+  begin
+    if FValidationErrorDisplay and Assigned(FOnValidationError) then
+    begin
+      KeepFocus := True;
+      FOnValidationError(Self, TrimmedValue, KeepFocus);
+    end;
   end;
 end;
 
@@ -717,18 +773,15 @@ begin
 
   BoxR := Rect(CX, CY, CX + W, CY + H);
 
-  // بدنه تقویم
   Canvas.Pen.Color := $005A5A5A;
   Canvas.Pen.Width := 1;
   Canvas.Brush.Color := clWhite;
   Canvas.Brush.Style := bsSolid;
   Canvas.Rectangle(BoxR);
 
-  // نوار بالای تقویم
-  Canvas.Brush.Color := $00C0504D; // قرمز نرم (Accent Color)
+  Canvas.Brush.Color := $00C0504D;
   Canvas.FillRect(Rect(BoxR.Left, BoxR.Top, BoxR.Right, BoxR.Top + 4));
 
-  // هدر دکمه‌ها/پین‌ها
   Canvas.Pen.Color := $00333333;
   Canvas.MoveTo(BoxR.Left + 3, BoxR.Top - 1);
   Canvas.LineTo(BoxR.Left + 3, BoxR.Top + 2);
@@ -736,7 +789,6 @@ begin
   Canvas.MoveTo(BoxR.Right - 4, BoxR.Top - 1);
   Canvas.LineTo(BoxR.Right - 4, BoxR.Top + 2);
 
-  // نقاط روزها
   Canvas.Brush.Color := $00787878;
   Canvas.FillRect(Rect(BoxR.Left + 3, BoxR.Top + 6, BoxR.Left + 5, BoxR.Top + 8));
   Canvas.FillRect(Rect(BoxR.Left + 6, BoxR.Top + 6, BoxR.Left + 8, BoxR.Top + 8));
@@ -751,13 +803,15 @@ procedure TJalaliDatePicker.DrawCalendarIcon(const R: TRect);
 var
   ImgX, ImgY: Integer;
 begin
+  // اگر Images و ImageIndex معتبر باشد → ImageList
+  // اگر Images باشد ولی ImageIndex=-1 → به else if/else می‌رود
   if Assigned(FImages) and (FImageIndex >= 0) and (FImageIndex < FImages.Count) then
   begin
     ImgX := R.Left + (R.Width - FImages.Width) div 2;
     ImgY := R.Top + (R.Height - FImages.Height) div 2;
     FImages.Draw(Canvas, ImgX, ImgY, FImageIndex, Enabled);
-  end;
-  if (FDropIcon.Graphic <> nil) and (not FDropIcon.Graphic.Empty) then
+  end
+  else if (FDropIcon.Graphic <> nil) and (not FDropIcon.Graphic.Empty) then
   begin
     ImgX := R.Left + (R.Width - FDropIcon.Width) div 2;
     ImgY := R.Top + (R.Height - FDropIcon.Height) div 2;
@@ -765,7 +819,6 @@ begin
   end
   else
   begin
-    // رسم آیکن شیک پیش‌فرض
     DrawDefaultCalendarIcon(R);
   end;
 end;
@@ -866,10 +919,27 @@ begin
   end;
 end;
 
+procedure TJalaliDatePicker.SelectPartAt(X: Integer);
+var
+  RYear, RMonth, RDay: TRect;
+begin
+  if FIsEmpty then Exit;
+
+  RYear := GetPartRect(dspYear);
+  RMonth := GetPartRect(dspMonth);
+  RDay := GetPartRect(dspDay);
+
+  if (X >= RYear.Left) and (X <= RYear.Right) then
+    SetSelectedPart(dspYear)
+  else if (X >= RMonth.Left) and (X <= RMonth.Right) then
+    SetSelectedPart(dspMonth)
+  else if (X >= RDay.Left) and (X <= RDay.Right) then
+    SetSelectedPart(dspDay);
+end;
+
 procedure TJalaliDatePicker.MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
 var
-  DropR, RYear, RMonth, RDay: TRect;
-  P: TPoint;
+  DropR: TRect;
 begin
   inherited;
   if Button = mbLeft then
@@ -881,6 +951,13 @@ begin
     if PtInRect(DropR, Point(X, Y)) then
     begin
       ToggleDropDown;
+    end
+    else
+    begin
+      if Assigned(FDropDown) and FDropDown.Visible then
+        CloseDropDown;
+
+      SelectPartAt(X);
     end;
   end;
 end;
@@ -888,7 +965,7 @@ end;
 procedure TJalaliDatePicker.WMGetDlgCode(var Message: TWMGetDlgCode);
 begin
   inherited;
-  Message.Result := Message.Result or DLGC_WANTCHARS or DLGC_WANTARROWS or DLGC_HASSETSEL;
+  Message.Result := Message.Result or DLGC_WANTCHARS or DLGC_WANTARROWS or DLGC_WANTALLKEYS;
 end;
 
 procedure TJalaliDatePicker.AdjustPartValue(Delta: Integer);
@@ -991,9 +1068,76 @@ begin
   end;
 end;
 
+procedure TJalaliDatePicker.ValidateAndApplyInput;
+var
+  Y, M, D, MaxD: Integer;
+  NewDate: TJalaliDate;
+begin
+  if FInputBuffer = '' then Exit;
+
+  case FSelectedPart of
+    dspYear:
+      begin
+        if FDateFormat = jdfYYMMDD then
+          Y := 1400 + StrToIntDef(FInputBuffer, FDate.Year mod 100)
+        else
+          Y := StrToIntDef(FInputBuffer, FDate.Year);
+        M := FDate.Month;
+        D := FDate.Day;
+      end;
+    dspMonth:
+      begin
+        Y := FDate.Year;
+        M := StrToIntDef(FInputBuffer, FDate.Month);
+        if M < 1 then M := 1 else if M > 12 then M := 12;
+        D := FDate.Day;
+      end;
+    dspDay:
+      begin
+        Y := FDate.Year;
+        M := FDate.Month;
+        D := StrToIntDef(FInputBuffer, FDate.Day);
+        MaxD := TJalaliCalendar.DaysInMonth(Y, M);
+        if D < 1 then D := 1 else if D > MaxD then D := MaxD;
+      end;
+  else
+    Exit;
+  end;
+
+  MaxD := TJalaliCalendar.DaysInMonth(Y, M);
+  if D > MaxD then D := MaxD;
+
+  NewDate.Year := Y;
+  NewDate.Month := M;
+  NewDate.Day := D;
+  SetDate(NewDate);
+  FInputBuffer := '';
+end;
+
 procedure TJalaliDatePicker.KeyPress(var Key: Char);
 begin
   inherited KeyPress(Key);
+
+  if Key = #8 then
+  begin
+    FInputBuffer := '';
+    case FSelectedPart of
+      dspDay: SetSelectedPart(dspMonth);
+      dspMonth: SetSelectedPart(dspYear);
+      dspYear:
+        begin
+          if not FIsEmpty then
+          begin
+            FIsEmpty := True;
+            FTextBuffer := '';
+            Invalidate;
+            if Assigned(FOnChange) then FOnChange(Self, FDate);
+          end;
+        end;
+    end;
+    Key := #0;
+    Exit;
+  end;
 
   if Key >= #32 then
   begin
@@ -1027,6 +1171,7 @@ begin
 
   if Key = VK_LEFT then
   begin
+    ValidateAndApplyInput;
     if FSelectedPart = dspDay then SetSelectedPart(dspMonth)
     else if FSelectedPart = dspMonth then SetSelectedPart(dspYear);
     Key := 0;
@@ -1035,21 +1180,36 @@ begin
 
   if Key = VK_RIGHT then
   begin
+    ValidateAndApplyInput;
     if FSelectedPart = dspYear then SetSelectedPart(dspMonth)
     else if FSelectedPart = dspMonth then SetSelectedPart(dspDay);
     Key := 0;
     Exit;
   end;
 
+  if (Key = VK_TAB) then
+    ValidateAndApplyInput;
+
   inherited KeyDown(Key, Shift);
+end;
+
+function TJalaliDatePicker.DoMouseWheel(Shift: TShiftState; WheelDelta: Integer; MousePos: TPoint): Boolean;
+begin
+  Result := inherited DoMouseWheel(Shift, WheelDelta, MousePos);
+  if not Result then
+  begin
+    if WheelDelta > 0 then
+      AdjustPartValue(1)
+    else
+      AdjustPartValue(-1);
+    Result := True;
+  end;
 end;
 
 procedure TJalaliDatePicker.DoEnter;
 begin
   inherited DoEnter;
   SyncTextBuffer;
-  HideCaret(Handle);
-  DestroyCaret;
   FSelectedPart := dspYear;
   FInputBuffer := '';
   Invalidate;
@@ -1057,8 +1217,7 @@ end;
 
 procedure TJalaliDatePicker.DoExit;
 begin
-  HideCaret(Handle);
-  DestroyCaret;
+  ValidateAndApplyInput;
   FInputBuffer := '';
   inherited DoExit;
   Invalidate;
@@ -1071,36 +1230,24 @@ begin
 end;
 
 procedure TJalaliDatePicker.HookOwnerForm;
+var
+  Form: TCustomForm;
 begin
-  FOwnerForm := GetParentForm(Self);
-  if Assigned(FOwnerForm) and not Assigned(FOwnerFormOrgProc) then
+  Form := GetParentForm(Self);
+  if Assigned(Form) and Form.HandleAllocated then
   begin
-    FOwnerFormOrgProc := FOwnerForm.WindowProc;
-    FOwnerForm.WindowProc := OwnerFormWndProc;
+    SetWindowSubclass(Form.Handle, @OwnerFormSubclassProc, UINT_PTR(Self), DWORD_PTR(Self));
   end;
 end;
 
 procedure TJalaliDatePicker.UnhookOwnerForm;
+var
+  Form: TCustomForm;
 begin
-  if Assigned(FOwnerForm) and Assigned(FOwnerFormOrgProc) then
+  Form := GetParentForm(Self);
+  if Assigned(Form) and Form.HandleAllocated then
   begin
-    FOwnerForm.WindowProc := FOwnerFormOrgProc;
-    FOwnerFormOrgProc := nil;
-  end;
-  FOwnerForm := nil;
-end;
-
-procedure TJalaliDatePicker.OwnerFormWndProc(var Message: TMessage);
-begin
-  if Assigned(FOwnerFormOrgProc) then
-    FOwnerFormOrgProc(Message);
-
-  case Message.Msg of
-    WM_MOVE, WM_SIZE:
-      begin
-        if Assigned(FDropDown) and FDropDown.Visible then
-          CloseDropDown;
-      end;
+    RemoveWindowSubclass(Form.Handle, @OwnerFormSubclassProc, UINT_PTR(Self));
   end;
 end;
 
@@ -1108,6 +1255,7 @@ procedure TJalaliDatePicker.ToggleDropDown;
 var
   P: TPoint;
   Offset, TargetIndex: Integer;
+  Mon: TMonitor;
 begin
   if Assigned(FDropDown) and FDropDown.Visible then
   begin
@@ -1146,9 +1294,13 @@ begin
 
   P := ClientToScreen(Point(0, Height));
 
-  if P.X + FDropDown.Width > Screen.Width then P.X := Screen.Width - FDropDown.Width;
-  if P.X < 0 then P.X := 0;
-  if P.Y + FDropDown.Height > Screen.Height then P.Y := ClientToScreen(Point(0, 0)).Y - FDropDown.Height;
+  Mon := Screen.MonitorFromWindow(Handle);
+  if P.X + FDropDown.Width > Mon.Left + Mon.Width then
+    P.X := Mon.Left + Mon.Width - FDropDown.Width;
+  if P.X < Mon.Left then
+    P.X := Mon.Left;
+  if P.Y + FDropDown.Height > Mon.Top + Mon.Height then
+    P.Y := ClientToScreen(Point(0, 0)).Y - FDropDown.Height;
 
   FDropDown.SetBounds(P.X, P.Y, FDropDown.Width, FDropDown.Height);
 
@@ -1168,14 +1320,16 @@ end;
 
 procedure TJalaliDatePicker.PopupDateSelected(Sender: TObject; const ADate: TJalaliDate);
 begin
-  FIsEmpty := False;
   if FDataLink.Editing or FDataLink.Edit then
   begin
     SetDate(ADate);
     FDataLink.Modified;
     FDataLink.UpdateRecord;
+  end
+  else
+  begin
+    SetDate(ADate);
   end;
-  SetDate(ADate);
   CloseDropDown;
   if CanFocus then SetFocus;
 end;
