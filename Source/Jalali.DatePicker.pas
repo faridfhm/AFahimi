@@ -110,6 +110,7 @@ type
     function DropButtonRect: TRect;
     function TextRect: TRect;
     procedure DrawCalendarIcon(const R: TRect);
+    procedure DrawDefaultCalendarIcon(const R: TRect);
     procedure DropIconChanged(Sender: TObject);
     procedure CMFontChanged(var Message: TMessage); message CM_FONTCHANGED;
 
@@ -237,11 +238,12 @@ end;
 
 procedure TJalaliPopupCalendar.Click;
 begin
-inherited Click;
+  inherited Click;
   if (HoverIndex >= 0) and Assigned(OnSelectDate) then
   begin
     OnSelectDate(Self, SelectedDate);
-  end;end;
+  end;
+end;
 
 procedure TJalaliPopupCalendar.AdjustDimensions;
 begin
@@ -319,8 +321,9 @@ begin
   FDropIcon.OnChange := DropIconChanged;
   FImageIndex := -1;
 
+  // مقداردهی اولیه به صورت خالی جهت پشتیبانی از UseTodayIfEmpty
   FDate := TJalaliCalendar.Today;
-  FIsEmpty := False;
+  FIsEmpty := True;
 
   FDataLink := TFieldDataLink.Create;
   FDataLink.Control := Self;
@@ -359,6 +362,7 @@ end;
 
 function TJalaliDatePicker.GetYearString: string;
 begin
+  if FIsEmpty then Exit('');
   if FDateFormat = jdfYYMMDD then
     Result := Format('%.2d', [FDate.Year mod 100])
   else
@@ -408,41 +412,20 @@ begin
   WDay   := Canvas.TextWidth(DayStr);
   WSep   := Canvas.TextWidth(SepStr);
 
-  if UseRightToLeftAlignment then
-  begin
-    CurX := RText.Right;
-    case APart of
-      dspYear:
-        Result := Rect(CurX - WYear, RText.Top, CurX, RText.Bottom);
-      dspMonth:
-        begin
-          CurX := CurX - (WYear + WSep);
-          Result := Rect(CurX - WMonth, RText.Top, CurX, RText.Bottom);
-        end;
-      dspDay:
-        begin
-          CurX := CurX - (WYear + WSep + WMonth + WSep);
-          Result := Rect(CurX - WDay, RText.Top, CurX, RText.Bottom);
-        end;
-    end;
-  end
-  else
-  begin
-    CurX := RText.Left;
-    case APart of
-      dspYear:
-        Result := Rect(CurX, RText.Top, CurX + WYear, RText.Bottom);
-      dspMonth:
-        begin
-          CurX := CurX + WYear + WSep;
-          Result := Rect(CurX, RText.Top, CurX + WMonth, RText.Bottom);
-        end;
-      dspDay:
-        begin
-          CurX := CurX + WYear + WSep + WMonth + WSep;
-          Result := Rect(CurX, RText.Top, CurX + WDay, RText.Bottom);
-        end;
-    end;
+  CurX := RText.Left;
+  case APart of
+    dspYear:
+      Result := Rect(CurX, RText.Top, CurX + WYear, RText.Bottom);
+    dspMonth:
+      begin
+        CurX := CurX + WYear + WSep;
+        Result := Rect(CurX, RText.Top, CurX + WMonth, RText.Bottom);
+      end;
+    dspDay:
+      begin
+        CurX := CurX + WYear + WSep + WMonth + WSep;
+        Result := Rect(CurX, RText.Top, CurX + WDay, RText.Bottom);
+      end;
   end;
 end;
 
@@ -451,15 +434,10 @@ begin
   inherited Loaded;
   if FUseTodayIfEmpty then
   begin
-    FIsEmpty := True;
-    FTextBuffer := '';
-  end
-  else
-  begin
     FIsEmpty := False;
     FDate := TJalaliCalendar.Today;
-    SyncTextBuffer;
   end;
+  SyncTextBuffer;
   Invalidate;
 end;
 
@@ -469,21 +447,13 @@ begin
   begin
     FUseTodayIfEmpty := Value;
 
-    if (csDesigning in ComponentState) then
+    if FIsEmpty and FUseTodayIfEmpty then
     begin
-      if FUseTodayIfEmpty then
-      begin
-        FIsEmpty := True;
-        FTextBuffer := '';
-      end
-      else
-      begin
-        FDate := TJalaliCalendar.Today;
-        FIsEmpty := False;
-        SyncTextBuffer;
-      end;
-      Invalidate;
+      FDate := TJalaliCalendar.Today;
+      FIsEmpty := False;
     end;
+    SyncTextBuffer;
+    Invalidate;
   end;
 end;
 
@@ -603,9 +573,19 @@ begin
   begin
     FIsEmpty := False;
     if FDataLink.Field.DataType in [ftDate, ftDateTime] then
+      SetDateTime(FDataLink.Field.AsDateTime)
+    else
+      SetValue(FDataLink.Field.AsString);
+  end
+  else
+  begin
+    if FUseTodayIfEmpty then
     begin
-      SetDateTime(FDataLink.Field.AsDateTime);
-    end;
+      FIsEmpty := False;
+      FDate := TJalaliCalendar.Today;
+    end
+    else
+      FIsEmpty := True;
   end;
   SyncTextBuffer;
   Invalidate;
@@ -654,7 +634,6 @@ begin
 
   if TrimmedValue = '' then
   begin
-    FIsEmpty := True;
     ClearDate;
     Exit;
   end;
@@ -715,10 +694,7 @@ end;
 
 function TJalaliDatePicker.DropButtonRect: TRect;
 begin
-  if UseRightToLeftAlignment then
-    Result := Rect(Width - GetDropButtonWidth, 0, Width, Height)
-  else
-    Result := Rect(0, 0, GetDropButtonWidth, Height);
+  Result := Rect(0, 0, GetDropButtonWidth, Height);
 end;
 
 function TJalaliDatePicker.TextRect: TRect;
@@ -726,10 +702,49 @@ var
   BtnW: Integer;
 begin
   BtnW := GetDropButtonWidth;
-  if UseRightToLeftAlignment then
-    Result := Rect(4, 2, Width - (BtnW + 4), Height - 2)
-  else
-    Result := Rect(BtnW + 4, 2, Width - 4, Height - 2);
+  Result := Rect(BtnW + 4, 2, Width - 4, Height - 2);
+end;
+
+procedure TJalaliDatePicker.DrawDefaultCalendarIcon(const R: TRect);
+var
+  CX, CY, W, H: Integer;
+  BoxR: TRect;
+begin
+  W := 14;
+  H := 14;
+  CX := R.Left + (R.Width - W) div 2;
+  CY := R.Top + (R.Height - H) div 2;
+
+  BoxR := Rect(CX, CY, CX + W, CY + H);
+
+  // بدنه تقویم
+  Canvas.Pen.Color := $005A5A5A;
+  Canvas.Pen.Width := 1;
+  Canvas.Brush.Color := clWhite;
+  Canvas.Brush.Style := bsSolid;
+  Canvas.Rectangle(BoxR);
+
+  // نوار بالای تقویم
+  Canvas.Brush.Color := $00C0504D; // قرمز نرم (Accent Color)
+  Canvas.FillRect(Rect(BoxR.Left, BoxR.Top, BoxR.Right, BoxR.Top + 4));
+
+  // هدر دکمه‌ها/پین‌ها
+  Canvas.Pen.Color := $00333333;
+  Canvas.MoveTo(BoxR.Left + 3, BoxR.Top - 1);
+  Canvas.LineTo(BoxR.Left + 3, BoxR.Top + 2);
+
+  Canvas.MoveTo(BoxR.Right - 4, BoxR.Top - 1);
+  Canvas.LineTo(BoxR.Right - 4, BoxR.Top + 2);
+
+  // نقاط روزها
+  Canvas.Brush.Color := $00787878;
+  Canvas.FillRect(Rect(BoxR.Left + 3, BoxR.Top + 6, BoxR.Left + 5, BoxR.Top + 8));
+  Canvas.FillRect(Rect(BoxR.Left + 6, BoxR.Top + 6, BoxR.Left + 8, BoxR.Top + 8));
+  Canvas.FillRect(Rect(BoxR.Left + 9, BoxR.Top + 6, BoxR.Left + 11, BoxR.Top + 8));
+
+  Canvas.FillRect(Rect(BoxR.Left + 3, BoxR.Top + 10, BoxR.Left + 5, BoxR.Top + 12));
+  Canvas.FillRect(Rect(BoxR.Left + 6, BoxR.Top + 10, BoxR.Left + 8, BoxR.Top + 12));
+  Canvas.FillRect(Rect(BoxR.Left + 9, BoxR.Top + 10, BoxR.Left + 11, BoxR.Top + 12));
 end;
 
 procedure TJalaliDatePicker.DrawCalendarIcon(const R: TRect);
@@ -741,6 +756,17 @@ begin
     ImgX := R.Left + (R.Width - FImages.Width) div 2;
     ImgY := R.Top + (R.Height - FImages.Height) div 2;
     FImages.Draw(Canvas, ImgX, ImgY, FImageIndex, Enabled);
+  end;
+  if (FDropIcon.Graphic <> nil) and (not FDropIcon.Graphic.Empty) then
+  begin
+    ImgX := R.Left + (R.Width - FDropIcon.Width) div 2;
+    ImgY := R.Top + (R.Height - FDropIcon.Height) div 2;
+    Canvas.Draw(ImgX, ImgY, FDropIcon.Graphic);
+  end
+  else
+  begin
+    // رسم آیکن شیک پیش‌فرض
+    DrawDefaultCalendarIcon(R);
   end;
 end;
 
@@ -756,10 +782,7 @@ var
     SegR: TRect;
     Flags: UINT;
   begin
-    if UseRightToLeftAlignment then
-      SegR := Rect(CurX - AWidth, RText.Top, CurX, RText.Bottom)
-    else
-      SegR := Rect(CurX, RText.Top, CurX + AWidth, RText.Bottom);
+    SegR := Rect(CurX, RText.Top, CurX + AWidth, RText.Bottom);
 
     Flags := DT_CENTER or DT_VCENTER or DT_SINGLELINE or DT_NOPREFIX;
     if UseRightToLeftAlignment then
@@ -784,10 +807,7 @@ var
       Winapi.Windows.DrawText(Canvas.Handle, PChar(AText), Length(AText), SegR, Flags);
     end;
 
-    if UseRightToLeftAlignment then
-      Dec(CurX, AWidth)
-    else
-      Inc(CurX, AWidth);
+    Inc(CurX, AWidth);
   end;
 
 begin
@@ -801,53 +821,40 @@ begin
   Canvas.Rectangle(0, 0, Width, Height);
 
   BtnW := GetDropButtonWidth;
-
-  if UseRightToLeftAlignment then
-    R := Rect(Width - BtnW, 0, Width, Height)
-  else
-    R := Rect(0, 0, BtnW, Height);
-
+  R := DropButtonRect;
   RText := TextRect;
 
   Canvas.Brush.Color := $00F3F3F3;
   Canvas.FillRect(Rect(R.Left + 1, R.Top + 1, R.Right - 1, R.Bottom - 1));
   Canvas.Pen.Color := $00CFCFCF;
-  if UseRightToLeftAlignment then
-  begin
-    Canvas.MoveTo(R.Left, R.Top);
-    Canvas.LineTo(R.Left, R.Bottom);
-  end
-  else
-  begin
-    Canvas.MoveTo(R.Right, R.Top);
-    Canvas.LineTo(R.Right, R.Bottom);
-  end;
+  Canvas.MoveTo(R.Right, R.Top);
+  Canvas.LineTo(R.Right, R.Bottom);
 
   DrawCalendarIcon(R);
 
   Canvas.Font.Assign(Self.Font);
   if not Enabled then Canvas.Font.Color := clGrayText;
 
-  YearStr  := GetYearString;
-  MonthStr := Format('%.2d', [FDate.Month]);
-  DayStr   := Format('%.2d', [FDate.Day]);
-  SepStr   := GetSeparatorChar;
+  if not FIsEmpty then
+  begin
+    YearStr  := GetYearString;
+    MonthStr := Format('%.2d', [FDate.Month]);
+    DayStr   := Format('%.2d', [FDate.Day]);
+    SepStr   := GetSeparatorChar;
 
-  WYear  := Canvas.TextWidth(YearStr);
-  WMonth := Canvas.TextWidth(MonthStr);
-  WDay   := Canvas.TextWidth(DayStr);
-  WSep   := Canvas.TextWidth(SepStr);
+    WYear  := Canvas.TextWidth(YearStr);
+    WMonth := Canvas.TextWidth(MonthStr);
+    WDay   := Canvas.TextWidth(DayStr);
+    WSep   := Canvas.TextWidth(SepStr);
 
-  if UseRightToLeftAlignment then
-    CurX := RText.Right
-  else
     CurX := RText.Left;
 
-  DrawSegment(YearStr, WYear, FSelectedPart = dspYear);
-  DrawSegment(SepStr, WSep, False);
-  DrawSegment(MonthStr, WMonth, FSelectedPart = dspMonth);
-  DrawSegment(SepStr, WSep, False);
-  DrawSegment(DayStr, WDay, FSelectedPart = dspDay);
+    DrawSegment(YearStr, WYear, FSelectedPart = dspYear);
+    DrawSegment(SepStr, WSep, False);
+    DrawSegment(MonthStr, WMonth, FSelectedPart = dspMonth);
+    DrawSegment(SepStr, WSep, False);
+    DrawSegment(DayStr, WDay, FSelectedPart = dspDay);
+  end;
 
   if Focused then
   begin
@@ -874,17 +881,6 @@ begin
     if PtInRect(DropR, Point(X, Y)) then
     begin
       ToggleDropDown;
-    end
-    else
-    begin
-      P := Point(X, Y);
-      RYear := GetPartRect(dspYear);
-      RMonth := GetPartRect(dspMonth);
-      RDay := GetPartRect(dspDay);
-
-      if PtInRect(RYear, P) then SetSelectedPart(dspYear)
-      else if PtInRect(RMonth, P) then SetSelectedPart(dspMonth)
-      else if PtInRect(RDay, P) then SetSelectedPart(dspDay);
     end;
   end;
 end;
@@ -900,6 +896,12 @@ var
   Y, M, D, MaxD: Integer;
   NewDate: TJalaliDate;
 begin
+  if FIsEmpty then
+  begin
+    FDate := TJalaliCalendar.Today;
+    FIsEmpty := False;
+  end;
+
   Y := FDate.Year;
   M := FDate.Month;
   D := FDate.Day;
@@ -938,6 +940,12 @@ var
   NewDate: TJalaliDate;
 begin
   if not CharInSet(Ch, ['0'..'9']) then Exit;
+
+  if FIsEmpty then
+  begin
+    FDate := TJalaliCalendar.Today;
+    FIsEmpty := False;
+  end;
 
   case FSelectedPart of
     dspYear:
@@ -1019,32 +1027,16 @@ begin
 
   if Key = VK_LEFT then
   begin
-    if UseRightToLeftAlignment then
-    begin
-      if FSelectedPart = dspYear then SetSelectedPart(dspMonth)
-      else if FSelectedPart = dspMonth then SetSelectedPart(dspDay);
-    end
-    else
-    begin
-      if FSelectedPart = dspDay then SetSelectedPart(dspMonth)
-      else if FSelectedPart = dspMonth then SetSelectedPart(dspYear);
-    end;
+    if FSelectedPart = dspDay then SetSelectedPart(dspMonth)
+    else if FSelectedPart = dspMonth then SetSelectedPart(dspYear);
     Key := 0;
     Exit;
   end;
 
   if Key = VK_RIGHT then
   begin
-    if UseRightToLeftAlignment then
-    begin
-      if FSelectedPart = dspDay then SetSelectedPart(dspMonth)
-      else if FSelectedPart = dspMonth then SetSelectedPart(dspYear);
-    end
-    else
-    begin
-      if FSelectedPart = dspYear then SetSelectedPart(dspMonth)
-      else if FSelectedPart = dspMonth then SetSelectedPart(dspDay);
-    end;
+    if FSelectedPart = dspYear then SetSelectedPart(dspMonth)
+    else if FSelectedPart = dspMonth then SetSelectedPart(dspDay);
     Key := 0;
     Exit;
   end;
@@ -1152,10 +1144,7 @@ begin
 
   FDropDown.Calendar.HoverIndex := TargetIndex;
 
-  if UseRightToLeftAlignment then
-    P := ClientToScreen(Point(Width - FDropDown.Width, Height))
-  else
-    P := ClientToScreen(Point(0, Height));
+  P := ClientToScreen(Point(0, Height));
 
   if P.X + FDropDown.Width > Screen.Width then P.X := Screen.Width - FDropDown.Width;
   if P.X < 0 then P.X := 0;
