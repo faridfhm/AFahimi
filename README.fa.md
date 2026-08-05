@@ -104,6 +104,11 @@
         <br />
         <sub><strong>انتخاب سال</strong></sub>
       </td>
+      <td align="center">
+        <img src="images/jalali-calendar-05.png" alt="پنل تاریخ" width="320" />
+        <br />
+        <sub><strong>پنل تاریخ</strong></sub>
+      </td>
     </tr>
   </table>
 </div>
