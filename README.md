@@ -267,7 +267,7 @@ This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) f
 
 **AF Software**  
 📧 AFSoft2010@gmail.com  
-🌐 [github.com/YOUR_USERNAME](https://github.com/YOUR_USERNAME)
+🌐 [github.com/faridfhm]([https://github.com/YOUR_USERNAME](https://github.com/faridfhm))
 
 ---
 
