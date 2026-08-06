@@ -238,7 +238,7 @@ JalaliDatePicker1.ValueMode := vmMiladi;
 
 | Item | Version |
 |------|---------|
-| Delphi | 10.3 Rio or later |
+| Del phi | 12.3 |
 | Platform | Windows 32-bit / 64-bit (VCL) |
 | Dependencies | `Jalali.Calendar`, `Jalali.CalendarCore` |
 
