@@ -110,8 +110,8 @@ type
     procedure DropIconChanged(Sender: TObject);
     procedure CMFontChanged(var Message: TMessage); message CM_FONTCHANGED;
 
-    procedure WMKillFocus(var Message: TWMKillFocus);
-    procedure CMCancelMode(var Message: TMessage);
+    procedure WMKillFocus(var Message: TWMKillFocus); message WM_KILLFOCUS;
+    procedure CMCancelMode(var Message: TMessage); message CM_CANCELMODE;
 
     procedure SyncTextBuffer;
     function IsValidJalaliStr(const S: string; out ADate: TJalaliDate): Boolean;
@@ -191,43 +191,57 @@ function RemoveWindowSubclass(hWnd: HWND; pfnSubclass: Pointer; uIdSubclass: UIN
 const
   C_PRODUCER_TEXT = 'AFSoft2010@gmail.com';
 
+// متغیرهای سراسری واحد برای مدیریت هوک موس
+var
+  MouseHookHandle: HHOOK = 0;
+  HookedPicker: TJalaliDatePicker = nil;
+
+// هوک موس رشته‌ای: کلیک در هر نقطهٔ فرم/کنترل را رهگیری می‌کند
+function DatePickerMouseHook(nCode: Integer; wParam: WPARAM; lParam: LPARAM): LRESULT; stdcall;
+var
+  Info: PMouseHookStruct;
+  Pt: TPoint;
+  PickerRect, DropRect: TRect;
+begin
+  if (nCode = HC_ACTION) and (HookedPicker <> nil) and
+     Assigned(HookedPicker.FDropDown) and HookedPicker.FDropDown.Visible then
+  begin
+    if (wParam = WM_LBUTTONDOWN) or (wParam = WM_RBUTTONDOWN) or
+       (wParam = WM_MBUTTONDOWN) or (wParam = WM_NCLBUTTONDOWN) then
+    begin
+      Info := PMouseHookStruct(lParam);
+      Pt := Info.pt;
+
+      PickerRect.TopLeft := HookedPicker.ClientToScreen(Point(0, 0));
+      PickerRect.BottomRight := HookedPicker.ClientToScreen(Point(HookedPicker.Width, HookedPicker.Height));
+
+      DropRect.TopLeft := Point(HookedPicker.FDropDown.Left, HookedPicker.FDropDown.Top);
+      DropRect.BottomRight := Point(HookedPicker.FDropDown.Left + HookedPicker.FDropDown.Width,
+                                     HookedPicker.FDropDown.Top + HookedPicker.FDropDown.Height);
+
+      if not PtInRect(PickerRect, Pt) and not PtInRect(DropRect, Pt) then
+        HookedPicker.CloseDropDown;
+    end;
+  end;
+  Result := CallNextHookEx(MouseHookHandle, nCode, wParam, lParam);
+end;
+
+// ساب‌کلاس فرم والد: فقط برای بستن دراپ‌داون هنگام Move/Size فرم
 function OwnerFormSubclassProc(hWnd: HWND; uMsg: UINT; wParam: WPARAM; lParam: LPARAM;
   uIdSubclass: UINT_PTR; dwRefData: DWORD_PTR): LRESULT; stdcall;
 var
   Picker: TJalaliDatePicker;
-  Pt: TPoint;
-  PickerRect, DropRect: TRect;
 begin
   Picker := TJalaliDatePicker(dwRefData);
-
+  
   case uMsg of
     WM_MOVE, WM_SIZE:
       begin
         if Assigned(Picker) and Assigned(Picker.FDropDown) and Picker.FDropDown.Visible then
           Picker.CloseDropDown;
       end;
-    WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_MBUTTONDOWN, WM_NCLBUTTONDOWN:
-      begin
-        if Assigned(Picker) and Assigned(Picker.FDropDown) and Picker.FDropDown.Visible then
-        begin
-          // اصلاح: استفاده از LOWORD/HIWORD به جای GET_X_LPARAM
-          Pt.X := LOWORD(lParam);
-          Pt.Y := HIWORD(lParam);
-          Winapi.Windows.ClientToScreen(hWnd, Pt);
-
-          PickerRect.TopLeft := Picker.ClientToScreen(Point(0, 0));
-          PickerRect.BottomRight := Picker.ClientToScreen(Point(Picker.Width, Picker.Height));
-
-          DropRect.TopLeft := Point(Picker.FDropDown.Left, Picker.FDropDown.Top);
-          DropRect.BottomRight := Point(Picker.FDropDown.Left + Picker.FDropDown.Width,
-                                         Picker.FDropDown.Top + Picker.FDropDown.Height);
-
-          if not PtInRect(PickerRect, Pt) and not PtInRect(DropRect, Pt) then
-            Picker.CloseDropDown;
-        end;
-      end;
   end;
-
+  
   Result := DefSubclassProc(hWnd, uMsg, wParam, lParam);
 end;
 
@@ -381,7 +395,7 @@ begin
   UnhookOwnerForm;
   if Assigned(FDropDown) then
   begin
-    FDropDown.Visible := False;
+    CloseDropDown;
     FreeAndNil(FDropDown);
   end;
   FDataLink.Free;
@@ -803,8 +817,6 @@ procedure TJalaliDatePicker.DrawCalendarIcon(const R: TRect);
 var
   ImgX, ImgY: Integer;
 begin
-  // اگر Images و ImageIndex معتبر باشد → ImageList
-  // اگر Images باشد ولی ImageIndex=-1 → به else if/else می‌رود
   if Assigned(FImages) and (FImageIndex >= 0) and (FImageIndex < FImages.Count) then
   begin
     ImgX := R.Left + (R.Width - FImages.Width) div 2;
@@ -924,11 +936,11 @@ var
   RYear, RMonth, RDay: TRect;
 begin
   if FIsEmpty then Exit;
-
+  
   RYear := GetPartRect(dspYear);
   RMonth := GetPartRect(dspMonth);
   RDay := GetPartRect(dspDay);
-
+  
   if (X >= RYear.Left) and (X <= RYear.Right) then
     SetSelectedPart(dspYear)
   else if (X >= RMonth.Left) and (X <= RMonth.Right) then
@@ -956,7 +968,7 @@ begin
     begin
       if Assigned(FDropDown) and FDropDown.Visible then
         CloseDropDown;
-
+      
       SelectPartAt(X);
     end;
   end;
@@ -1074,7 +1086,7 @@ var
   NewDate: TJalaliDate;
 begin
   if FInputBuffer = '' then Exit;
-
+  
   case FSelectedPart of
     dspYear:
       begin
@@ -1103,10 +1115,10 @@ begin
   else
     Exit;
   end;
-
+  
   MaxD := TJalaliCalendar.DaysInMonth(Y, M);
   if D > MaxD then D := MaxD;
-
+  
   NewDate.Year := Y;
   NewDate.Month := M;
   NewDate.Day := D;
@@ -1295,14 +1307,18 @@ begin
   P := ClientToScreen(Point(0, Height));
 
   Mon := Screen.MonitorFromWindow(Handle);
-  if P.X + FDropDown.Width > Mon.Left + Mon.Width then
+  if P.X + FDropDown.Width > Mon.Left + Mon.Width then 
     P.X := Mon.Left + Mon.Width - FDropDown.Width;
-  if P.X < Mon.Left then
+  if P.X < Mon.Left then 
     P.X := Mon.Left;
-  if P.Y + FDropDown.Height > Mon.Top + Mon.Height then
+  if P.Y + FDropDown.Height > Mon.Top + Mon.Height then 
     P.Y := ClientToScreen(Point(0, 0)).Y - FDropDown.Height;
 
   FDropDown.SetBounds(P.X, P.Y, FDropDown.Width, FDropDown.Height);
+
+  // نصب هوک موس رشته‌ای برای شناسایی کلیک خارج
+  HookedPicker := Self;
+  MouseHookHandle := SetWindowsHookEx(WH_MOUSE, @DatePickerMouseHook, 0, GetCurrentThreadId);
 
   HookOwnerForm;
 
@@ -1313,6 +1329,14 @@ end;
 
 procedure TJalaliDatePicker.CloseDropDown;
 begin
+  // حذف هوک موس
+  if MouseHookHandle <> 0 then
+  begin
+    UnhookWindowsHookEx(MouseHookHandle);
+    MouseHookHandle := 0;
+  end;
+  HookedPicker := nil;
+
   if Assigned(FDropDown) then
     FDropDown.Visible := False;
   UnhookOwnerForm;
