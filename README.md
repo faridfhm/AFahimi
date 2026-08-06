@@ -247,26 +247,9 @@ JalaliDatePicker1.ValueMode := vmMiladi;
 ## 🖼️ Preview
 
 > <p align="center">
-  <img src="images/screenshot.png" alt="Jalali DatePicker Screenshot" width="700">
+  <img src="images/Screenshot 2026-08-06 044539.png" alt="Jalali DatePicker Screenshot" width="700">
 </p>
 
-```
-┌─────────────────────────────┐
-│ 📅  1403/06/15         ▼    │
-└─────────────────────────────┘
-         ↓
-┌─────────────────────────────┐
-│      <<  Shahrivar 1403 >>  │
-│  Sh  Y  D  S  Ch  P  J      │
-│     1  2  3  4  5  6        │
-│  7  8  9 10 11 12 13        │
-│ 14 15 16 17 18 19 20        │
-│ 21 22 23 24 25 26 27        │
-│ 28 29 30 31                 │
-└─────────────────────────────┘
-```
-
----
 
 ## 🤝 Contributing
 
