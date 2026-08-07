@@ -61,6 +61,7 @@ type
     FOnValidationError: TJalaliValidationErrorEvent;
 
     FDateFormat: TJalaliDateFormat;
+    FBorderColor: TColor;  // ← جدید
 
     FDropDownWidth: Integer;
     FDropDown: TJalaliDropDownForm;
@@ -84,6 +85,7 @@ type
     procedure SetDataSource(Value: TDataSource);
     procedure SetValueMode(Value: TDateValueMode);
     procedure SetDateFormat(Value: TJalaliDateFormat);
+    procedure SetBorderColor(Value: TColor);  // ← جدید
 
     function GetDateTime: TDateTime;
     function GetValue: string;
@@ -150,6 +152,7 @@ type
   published
     property Producer: string read FProducer;
     property DateFormat: TJalaliDateFormat read FDateFormat write SetDateFormat default jdfYYYYMMDD;
+    property BorderColor: TColor read FBorderColor write SetBorderColor default $00CFCFCF;  // ← جدید
     property UseTodayIfEmpty: Boolean read FUseTodayIfEmpty write SetUseTodayIfEmpty default False;
     property ValidationErrorDisplay: Boolean read FValidationErrorDisplay write FValidationErrorDisplay default True;
     property OnValidationError: TJalaliValidationErrorEvent read FOnValidationError write FOnValidationError;
@@ -191,12 +194,10 @@ function RemoveWindowSubclass(hWnd: HWND; pfnSubclass: Pointer; uIdSubclass: UIN
 const
   C_PRODUCER_TEXT = 'AFSoft2010@gmail.com';
 
-// متغیرهای سراسری واحد برای مدیریت هوک موس
 var
   MouseHookHandle: HHOOK = 0;
   HookedPicker: TJalaliDatePicker = nil;
 
-// هوک موس رشته‌ای: کلیک در هر نقطهٔ فرم/کنترل را رهگیری می‌کند
 function DatePickerMouseHook(nCode: Integer; wParam: WPARAM; lParam: LPARAM): LRESULT; stdcall;
 var
   Info: PMouseHookStruct;
@@ -226,14 +227,13 @@ begin
   Result := CallNextHookEx(MouseHookHandle, nCode, wParam, lParam);
 end;
 
-// ساب‌کلاس فرم والد: فقط برای بستن دراپ‌داون هنگام Move/Size فرم
 function OwnerFormSubclassProc(hWnd: HWND; uMsg: UINT; wParam: WPARAM; lParam: LPARAM;
   uIdSubclass: UINT_PTR; dwRefData: DWORD_PTR): LRESULT; stdcall;
 var
   Picker: TJalaliDatePicker;
 begin
   Picker := TJalaliDatePicker(dwRefData);
-  
+
   case uMsg of
     WM_MOVE, WM_SIZE:
       begin
@@ -241,7 +241,7 @@ begin
           Picker.CloseDropDown;
       end;
   end;
-  
+
   Result := DefSubclassProc(hWnd, uMsg, wParam, lParam);
 end;
 
@@ -338,7 +338,11 @@ end;
 procedure TJalaliDropDownForm.Paint;
 begin
   inherited;
-  Canvas.Pen.Color := $00CFCFCF;
+  // اصلاح: استفاده از رنگ Border پیکر در صورت وجود
+  if Assigned(FPicker) then
+    Canvas.Pen.Color := FPicker.BorderColor
+  else
+    Canvas.Pen.Color := $00CFCFCF;
   Canvas.Pen.Width := 1;
   Canvas.Brush.Style := bsClear;
   Canvas.Rectangle(0, 0, Width, Height);
@@ -368,6 +372,7 @@ begin
   TabStop := True;
 
   FDateFormat := jdfYYYYMMDD;
+  FBorderColor := $00CFCFCF;  // ← جدید: مقدار پیش‌فرض
   FDropDownWidth := 0;
   FSelectedPart := dspYear;
   FInputBuffer := '';
@@ -409,6 +414,16 @@ begin
   begin
     FDateFormat := Value;
     SyncTextBuffer;
+    Invalidate;
+  end;
+end;
+
+// ← جدید: ست BorderColor
+procedure TJalaliDatePicker.SetBorderColor(Value: TColor);
+begin
+  if FBorderColor <> Value then
+  begin
+    FBorderColor := Value;
     Invalidate;
   end;
 end;
@@ -882,7 +897,8 @@ begin
   Canvas.Brush.Style := bsSolid;
   Canvas.FillRect(ClientRect);
 
-  Canvas.Pen.Color := $00CFCFCF;
+  // اصلاح: استفاده از FBorderColor به جای رنگ ثابت
+  Canvas.Pen.Color := FBorderColor;
   Canvas.Rectangle(0, 0, Width, Height);
 
   BtnW := GetDropButtonWidth;
@@ -891,7 +907,9 @@ begin
 
   Canvas.Brush.Color := $00F3F3F3;
   Canvas.FillRect(Rect(R.Left + 1, R.Top + 1, R.Right - 1, R.Bottom - 1));
-  Canvas.Pen.Color := $00CFCFCF;
+
+  // اصلاح: خط جداکننده دکمه نیز از BorderColor استفاده می‌کند
+  Canvas.Pen.Color := FBorderColor;
   Canvas.MoveTo(R.Right, R.Top);
   Canvas.LineTo(R.Right, R.Bottom);
 
@@ -936,11 +954,11 @@ var
   RYear, RMonth, RDay: TRect;
 begin
   if FIsEmpty then Exit;
-  
+
   RYear := GetPartRect(dspYear);
   RMonth := GetPartRect(dspMonth);
   RDay := GetPartRect(dspDay);
-  
+
   if (X >= RYear.Left) and (X <= RYear.Right) then
     SetSelectedPart(dspYear)
   else if (X >= RMonth.Left) and (X <= RMonth.Right) then
@@ -968,7 +986,7 @@ begin
     begin
       if Assigned(FDropDown) and FDropDown.Visible then
         CloseDropDown;
-      
+
       SelectPartAt(X);
     end;
   end;
@@ -1086,7 +1104,7 @@ var
   NewDate: TJalaliDate;
 begin
   if FInputBuffer = '' then Exit;
-  
+
   case FSelectedPart of
     dspYear:
       begin
@@ -1115,10 +1133,10 @@ begin
   else
     Exit;
   end;
-  
+
   MaxD := TJalaliCalendar.DaysInMonth(Y, M);
   if D > MaxD then D := MaxD;
-  
+
   NewDate.Year := Y;
   NewDate.Month := M;
   NewDate.Day := D;
@@ -1307,16 +1325,15 @@ begin
   P := ClientToScreen(Point(0, Height));
 
   Mon := Screen.MonitorFromWindow(Handle);
-  if P.X + FDropDown.Width > Mon.Left + Mon.Width then 
+  if P.X + FDropDown.Width > Mon.Left + Mon.Width then
     P.X := Mon.Left + Mon.Width - FDropDown.Width;
-  if P.X < Mon.Left then 
+  if P.X < Mon.Left then
     P.X := Mon.Left;
-  if P.Y + FDropDown.Height > Mon.Top + Mon.Height then 
+  if P.Y + FDropDown.Height > Mon.Top + Mon.Height then
     P.Y := ClientToScreen(Point(0, 0)).Y - FDropDown.Height;
 
   FDropDown.SetBounds(P.X, P.Y, FDropDown.Width, FDropDown.Height);
 
-  // نصب هوک موس رشته‌ای برای شناسایی کلیک خارج
   HookedPicker := Self;
   MouseHookHandle := SetWindowsHookEx(WH_MOUSE, @DatePickerMouseHook, 0, GetCurrentThreadId);
 
@@ -1329,7 +1346,6 @@ end;
 
 procedure TJalaliDatePicker.CloseDropDown;
 begin
-  // حذف هوک موس
   if MouseHookHandle <> 0 then
   begin
     UnhookWindowsHookEx(MouseHookHandle);
